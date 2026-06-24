@@ -1,4 +1,4 @@
-export const APP_VERSION = "0.7a3-fix2";
+export const APP_VERSION = "0.7a3-fix3";
 export const APP_CHANGELOG = [
 {
   version: "0.7a3",
