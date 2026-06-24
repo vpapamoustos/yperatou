@@ -1,35 +1,12 @@
 import { APP_VERSION, APP_CHANGELOG } from "./src/changelog.js";
 import { DECKS } from "./src/data.js";
+import { S } from "./src/state.js";
 
 let ACTIVE_DECK = DECKS.europe;
 
 function attrs() {
   return ACTIVE_DECK.attrs;
 }
-
-let S = {
-  screen: "home",
-
-  mode: "bot",
-  matchType: "quick",
-
-  player1Name: "Παίκτης 1",
-  player2Name: "Bot",
-
-  p: [],
-  b: [],
-
-  pending: [],
-  round: null,
-  log: [],
-
-  currentTurn: "player1",
-
-  timeLeft: null,
-  timerId: null,
-  timeExpired: false,
-  debugOpen: false
-};
 
 const app = document.getElementById("app");
 
