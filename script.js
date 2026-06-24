@@ -265,7 +265,7 @@ function scoreBar() {
       </div>
 
       <div class="rounded-2xl border border-amber-400/30 bg-amber-500/10 p-3 text-center">
-        <p class="text-xs text-amber-300">Pile</p>
+        <p class="text-xs text-amber-300">Κάρτες σε αναμονή</p>
         <p class="text-2xl font-black">${S.pending.length}</p>
       </div>
 
@@ -382,7 +382,7 @@ function home() {
 
         <div class="grid grid-cols-2 gap-3">
           <button
-            onclick="S.mode='bot'; S.player2Name='Bot'; render()"
+            onclick="S.mode='bot'; S.player2Name='Υπολογιστής'; render()"
             class="rounded-2xl px-4 py-3 font-black ${
               S.mode === "bot"
                 ? "bg-amber-500 text-slate-950"
@@ -393,7 +393,7 @@ function home() {
           </button>
 
           <button
-            onclick="S.mode='human'; if(S.player2Name==='Bot') S.player2Name='Παίκτης 2'; render()"
+            onclick="S.mode='human'; if(S.player2Name==='Υπολογιστής') S.player2Name='Παίκτης 2'; render()"
             class="rounded-2xl px-4 py-3 font-black ${
               S.mode === "human"
                 ? "bg-amber-500 text-slate-950"
@@ -437,7 +437,7 @@ function home() {
             S.player1Name=document.getElementById('p1Name').value||'Player 1';
             S.player2Name=S.mode==='human'
               ? (document.getElementById('p2Name').value||'Player 2')
-              : 'Bot';
+              : 'Υπολογιστής';
             startMatch(S.mode, 'quick');
           "
           class="rounded-2xl bg-amber-500 px-5 py-4 font-black text-slate-950"
@@ -450,7 +450,7 @@ function home() {
             S.player1Name=document.getElementById('p1Name').value||'Player 1';
             S.player2Name=S.mode==='human'
               ? (document.getElementById('p2Name').value||'Player 2')
-              : 'Bot';
+              : 'Υπολογιστής';
             startMatch(S.mode, 'classic');
           "
           class="rounded-2xl border border-slate-700 bg-slate-800 px-5 py-4 font-black"
@@ -463,7 +463,7 @@ function home() {
             S.player1Name=document.getElementById('p1Name').value||'Player 1';
             S.player2Name=S.mode==='human'
               ? (document.getElementById('p2Name').value||'Player 2')
-              : 'Bot';
+              : 'Υπολογιστής';
             startMatch(S.mode, 'time');
           "
           class="rounded-2xl border border-amber-500 bg-slate-950 px-5 py-4 font-black text-amber-400"
@@ -476,9 +476,9 @@ function home() {
     <section class="mt-5 rounded-[2rem] border border-slate-800 bg-slate-900/60 p-5">
       <h3 class="font-black">Κανόνες</h3>
       <p class="mt-2 text-sm text-slate-400">
-        Διάλεξε χαρακτηριστικό όταν είναι η σειρά σου.
-        Ο νικητής του γύρου παίζει στον επόμενο γύρο.
-        Σε ισοπαλία οι κάρτες πάνε στο pending pile και ο επόμενος νικητής τα παίρνει όλα.
+        1. Διάλεξε χαρακτηριστικό όταν είναι η σειρά σου.<br>
+        2. Ο νικητής του γύρου παίζει στον επόμενο γύρο.<br>
+        3. Σε ισοπαλία οι κάρτες πάνε στο pending pile και ο επόμενος νικητής τα παίρνει όλα.
       </p>
     </section>
 
@@ -490,8 +490,8 @@ function game() {
   if (S.mode === "bot" && S.currentTurn === "bot") {
     app.innerHTML = h() + `
       <section class="mb-4 rounded-3xl border border-rose-400/30 bg-rose-500/10 p-4 text-center">
-        <p class="text-sm text-slate-300">Bot's turn</p>
-        <h2 class="mt-1 text-2xl font-black">Το bot επιλέγει attribute</h2>
+        <p class="text-sm text-slate-300">Σειρά του υπολογιστή</p>
+        <h2 class="mt-1 text-2xl font-black">Ο υπολογιστής επιλέγει χαρακτηριστικό</h2>
         <p class="mt-1 text-sm text-slate-400">Η επιλογή γίνεται τυχαία για το MVP.</p>
       </section>
 
@@ -502,7 +502,7 @@ function game() {
           onclick="botPickRandomAttribute()"
           class="w-full rounded-2xl bg-rose-500 px-4 py-4 font-black text-white"
         >
-          Bot selects attribute
+          Ο υπολογιστής επιλέγει χαρακτηριστικό
         </button>
       </div>
 
@@ -532,8 +532,8 @@ function game() {
         ? "border border-emerald-400/30 bg-emerald-500/10"
         : "border border-rose-400/30 bg-rose-500/10"
     } p-4">
-      <p class="text-sm text-slate-300">${activeName}'s turn</p>
-      <h2 class="mt-1 text-2xl font-black">Διάλεξε attribute</h2>
+      <p class="text-sm text-slate-300">${activeName} είναι η σειρά σου</p>
+      <h2 class="mt-1 text-2xl font-black">Διάλεξε χαρακτηριστικό!</h2>
     </section>
 
     ${debugDeckOrder()}
@@ -661,7 +661,7 @@ function result() {
 
     <div class="mb-8">
       <button onclick="cont()" class="w-full rounded-2xl bg-amber-500 px-4 py-4 font-black text-slate-950">
-        Continue
+        Συνέχεια
       </button>
     </div>
 
