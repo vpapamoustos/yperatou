@@ -1,7 +1,7 @@
 import { APP_VERSION, APP_CHANGELOG } from "./src/changelog.js";
 import { DECKS } from "./src/data.js";
 
-let ACTIVE_DECK = DECKS.performance;
+let ACTIVE_DECK = DECKS.europe;
 
 function attrs() {
   return ACTIVE_DECK.attrs;
@@ -13,7 +13,7 @@ let S = {
   mode: "bot",
   matchType: "quick",
 
-  player1Name: "Όνομα παίκτη 1",
+  player1Name: "Παίκτης 1",
   player2Name: "Bot",
 
   p: [],
@@ -392,9 +392,9 @@ function home() {
           onchange="selectDeck(this.value)"
           class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 font-bold text-white outline-none focus:border-amber-400"
         >
+          <option value="europe" ${ACTIVE_DECK.id === "europe" ? "selected" : ""}>Χώρες της Ευρώπης</option>
           <option value="performance" ${ACTIVE_DECK.id === "performance" ? "selected" : ""}>Performance Legends</option>
           <option value="space" ${ACTIVE_DECK.id === "space" ? "selected" : ""}>Cosmic Legends</option>
-          <option value="europe" ${ACTIVE_DECK.id === "europe" ? "selected" : ""}>Χώρες της Ευρώπης</option>
         </select>
       </div>
 
@@ -412,24 +412,24 @@ function home() {
                 : "border border-slate-700 bg-slate-800 text-white"
             }"
           >
-            Αν παίζεις μόνος σου
+            1 Παίκτης
           </button>
 
           <button
-            onclick="S.mode='human'; if(S.player2Name==='Bot') S.player2Name='Όνομα παίκτη 2'; render()"
+            onclick="S.mode='human'; if(S.player2Name==='Bot') S.player2Name='Παίκτης 2'; render()"
             class="rounded-2xl px-4 py-3 font-black ${
               S.mode === "human"
                 ? "bg-amber-500 text-slate-950"
                 : "border border-slate-700 bg-slate-800 text-white"
             }"
           >
-            Αν παίζεις με παρέα
+            2 Παίκτες
           </button>
         </div>
       </div>
 
       <label class="mb-2 block text-sm font-bold text-slate-300">
-        Παίκτης 1
+        Όνομα παίκτη 1
       </label>
 
       <input
@@ -442,7 +442,7 @@ function home() {
         S.mode === "human"
           ? `
             <label class="mb-2 block text-sm font-bold text-slate-300">
-              Παίκτης 2
+              Όνομα παίκτη 2
             </label>
 
             <input
