@@ -5,7 +5,7 @@ export const S = {
     matchType: "quick",
   
     player1Name: "Παίκτης 1",
-    player2Name: "Bot",
+    player2Name: "Υπολογιστής",
   
     p: [],
     b: [],

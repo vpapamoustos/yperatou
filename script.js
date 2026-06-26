@@ -641,12 +641,12 @@ function result() {
       ? S.player1Name
       : r.selectedBy === "player2"
         ? S.player2Name
-        : "Bot";
+        : "Υπολογιστής";
 
   const txt =
     r.w === "tie"
       ? "Ισοπαλία"
-      : `${winnerName} wins`;
+      : `Κερδίζει ο/η ${winnerName}`;
 
   const selectedByText = `${selectedByName} selected`;
 
@@ -661,7 +661,7 @@ function result() {
 
     <div class="mb-8">
       <button onclick="cont()" class="w-full rounded-2xl bg-amber-500 px-4 py-4 font-black text-slate-950">
-        Συνέχεια
+        Επόμενη κάρτα
       </button>
     </div>
 
@@ -688,7 +688,7 @@ function handoff() {
   app.innerHTML = h() + `
     <section class="rounded-[2rem] border border-slate-800 bg-slate-900 p-6 text-center">
       <p class="text-xs uppercase tracking-[.35em] text-amber-400">
-        Human vs Human
+        Παιχνίδι 2 παικτών
       </p>
 
       <h2 class="mt-3 text-3xl font-black">
@@ -718,17 +718,17 @@ function over() {
   let winnerText = "";
 
   if (p1Cards > p2Cards) {
-    winnerText = `${S.player1Name} wins!`;
+    winnerText = `Κέρδισε ο/η ${S.player1Name} !`;
   } else if (p2Cards > p1Cards) {
-    winnerText = `${S.player2Name} wins!`;
+    winnerText = `Κέρδισε ο/η ${S.player2Name} !`;
   } else {
-    winnerText = "Draw!";
+    winnerText = "Ισοπαλία!";
   }
 
   app.innerHTML = h() + `
     <section class="rounded-[2rem] border border-slate-800 bg-slate-900 p-6 text-center">
       <p class="text-xs uppercase tracking-[.35em] text-amber-400">
-        Game Over
+        Τέλος παιχνιδιού
       </p>
 
       <h2 class="mt-2 text-4xl font-black">
@@ -739,7 +739,7 @@ function over() {
         S.matchType === "time"
           ? `
             <p class="mt-3 text-sm font-bold text-slate-400">
-              Time Attack finished
+              Ολοκληρώθηκε το παιχνίδι Time Attack
             </p>
           `
           : ""
@@ -758,11 +758,11 @@ function over() {
       </div>
 
       <button onclick="start(S.matchType)" class="mt-6 w-full rounded-2xl bg-amber-500 px-4 py-4 font-black text-slate-950">
-        Play Again
+        Παίξε ξανά
       </button>
 
       <button onclick="stopTimer(); S.screen='home'; render()" class="mt-3 w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-4 font-black">
-        Home
+        Αρχική σελίδα
       </button>
     </section>
   `;
