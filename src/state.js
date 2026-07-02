@@ -3,6 +3,10 @@ export const S = {
   
     mode: "bot",
     matchType: "quick",
+    quickCardsPerPlayer: 7,
+    timeAttackMinutes: 3,
+    quickSettingsOpen: false,
+    timeSettingsOpen: false,
   
     player1Name: "Παίκτης 1",
     player2Name: "Υπολογιστής",

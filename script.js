@@ -64,12 +64,116 @@ function formatTime(seconds) {
   return `${mins}:${String(secs).padStart(2, "0")}`;
 }
 
+function clampInt(value, min, max, fallback) {
+  const parsed = Number.parseInt(value, 10);
+  const safeValue = Number.isFinite(parsed) ? parsed : fallback;
+
+  return Math.min(max, Math.max(min, safeValue));
+}
+
+function maxQuickCardsPerPlayer() {
+  return Math.min(15, Math.floor(ACTIVE_DECK.cards.length / 2));
+}
+
+function quickCardsPerPlayer() {
+  return clampInt(S.quickCardsPerPlayer, 1, maxQuickCardsPerPlayer(), 7);
+}
+
+function timeAttackMinutes() {
+  return clampInt(S.timeAttackMinutes, 1, 20, 3);
+}
+
+function timeAttackSeconds() {
+  return timeAttackMinutes() * 60;
+}
+
+function clampNumberInput(input, min, max, fallback, allowEmpty = false) {
+  if (allowEmpty && input.value === "") return fallback;
+
+  const value = clampInt(input.value, min, max, fallback);
+
+  input.value = value;
+
+  return value;
+}
+
+function applyHomeSettings() {
+  const quickInput = document.getElementById("quickCardsPerPlayer");
+  const timeInput = document.getElementById("timeAttackMinutes");
+
+  S.quickCardsPerPlayer = quickCardsPerPlayer();
+  S.timeAttackMinutes = timeAttackMinutes();
+
+  if (quickInput) {
+    S.quickCardsPerPlayer = clampNumberInput(
+      quickInput,
+      1,
+      maxQuickCardsPerPlayer(),
+      S.quickCardsPerPlayer
+    );
+  }
+
+  if (timeInput) {
+    S.timeAttackMinutes = clampNumberInput(timeInput, 1, 20, S.timeAttackMinutes);
+  }
+}
+
+function clampQuickCardsInput(input, allowEmpty = false) {
+  S.quickCardsPerPlayer = clampNumberInput(
+    input,
+    1,
+    maxQuickCardsPerPlayer(),
+    quickCardsPerPlayer(),
+    allowEmpty
+  );
+}
+
+function clampTimeAttackInput(input, allowEmpty = false) {
+  S.timeAttackMinutes = clampNumberInput(input, 1, 20, timeAttackMinutes(), allowEmpty);
+}
+
+function applyPlayerNames() {
+  S.player1Name = document.getElementById("p1Name").value || "Player 1";
+  S.player2Name = S.mode === "human"
+    ? (document.getElementById("p2Name").value || "Player 2")
+    : "Υπολογιστής";
+}
+
+function startHomeMatch(type) {
+  applyPlayerNames();
+  applyHomeSettings();
+  startMatch(S.mode, type);
+}
+
+function setMatchSettingsPanel(type, isOpen) {
+  const stateKey = type === "quick" ? "quickSettingsOpen" : "timeSettingsOpen";
+  const panelId = type === "quick" ? "quickMatchSettings" : "timeAttackSettings";
+  const buttonId = type === "quick" ? "quickMatchToggle" : "timeAttackToggle";
+  const panel = document.getElementById(panelId);
+  const button = document.getElementById(buttonId);
+
+  S[stateKey] = isOpen;
+  panel?.classList.toggle("is-open", isOpen);
+  button?.setAttribute("aria-expanded", String(isOpen));
+}
+
+function toggleMatchSettings(type) {
+  applyHomeSettings();
+
+  if (type === "quick") {
+    setMatchSettingsPanel("quick", !S.quickSettingsOpen);
+    return;
+  }
+
+  setMatchSettingsPanel("time", !S.timeSettingsOpen);
+}
+
 function startTimer() {
   stopTimer();
 
   if (S.matchType !== "time") return;
 
-  S.timeLeft = 180;
+  S.timeLeft = timeAttackSeconds();
   S.timeExpired = false;
 
   S.timerId = setInterval(() => {
@@ -106,7 +210,7 @@ function startMatch(mode, type) {
 
   const n =
     type === "quick"
-      ? 14
+      ? quickCardsPerPlayer() * 2
       : 30;
 
   let deck = shuffle(ACTIVE_DECK.cards).slice(0, n);
@@ -122,7 +226,7 @@ function startMatch(mode, type) {
   S.currentTurn = "player1";
   S.screen = "game";
 
-  S.timeLeft = type === "time" ? 180 : null;
+  S.timeLeft = type === "time" ? timeAttackSeconds() : null;
   S.timeExpired = false;
 
   render();
@@ -333,8 +437,10 @@ function debugDeckOrder() {
 
 function changelogPanel() {
   return `
-    <section class="mt-5 rounded-[2rem] border border-slate-800 bg-slate-900/60 p-5">
-      <h3 class="font-black">Version Changes</h3>
+    <details class="mt-5 rounded-[2rem] border border-slate-800 bg-slate-900/60 p-5">
+      <summary class="cursor-pointer font-black">
+        Version Changes
+      </summary>
 
       <div class="mt-4 grid gap-4">
         ${APP_CHANGELOG.map(item => `
@@ -351,11 +457,14 @@ function changelogPanel() {
           </div>
         `).join("")}
       </div>
-    </section>
+    </details>
   `;
 }
 
 function home() {
+  const quickCards = quickCardsPerPlayer();
+  const timeMinutes = timeAttackMinutes();
+
   app.innerHTML = h() + `
     <section class="rounded-[2rem] border border-slate-800 bg-slate-900/80 p-5">
       <h2 class="mb-4 text-xl font-black">Επιλογές</h2>
@@ -432,44 +541,110 @@ function home() {
       }
 
       <div class="grid gap-3">
-        <button
-          onclick="
-            S.player1Name=document.getElementById('p1Name').value||'Player 1';
-            S.player2Name=S.mode==='human'
-              ? (document.getElementById('p2Name').value||'Player 2')
-              : 'Υπολογιστής';
-            startMatch(S.mode, 'quick');
-          "
-          class="rounded-2xl bg-amber-500 px-5 py-4 font-black text-slate-950"
-        >
-          Quick Match · 7 vs 7
-        </button>
+        <div>
+          <button
+            id="quickMatchToggle"
+            onclick="toggleMatchSettings('quick')"
+            aria-expanded="${S.quickSettingsOpen}"
+            class="w-full rounded-2xl bg-amber-500 px-5 py-4 font-black text-slate-950"
+          >
+            Quick Match
+          </button>
+
+          <div
+            id="quickMatchSettings"
+            class="match-settings ${S.quickSettingsOpen ? "is-open" : ""}"
+          >
+            <div class="mt-3 rounded-2xl border border-amber-500 bg-slate-950 p-4">
+              <label
+                for="quickCardsPerPlayer"
+                class="mb-2 block text-sm font-bold text-slate-300"
+              >
+                Κάρτες ανά παίκτη
+              </label>
+
+              <input
+                id="quickCardsPerPlayer"
+                type="number"
+                min="1"
+                max="${maxQuickCardsPerPlayer()}"
+                step="1"
+                value="${quickCards}"
+                oninput="clampQuickCardsInput(this, true)"
+                onchange="clampQuickCardsInput(this)"
+                onblur="clampQuickCardsInput(this)"
+                class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 font-bold outline-none focus:border-amber-400"
+              />
+
+              <p class="mt-2 mb-3 text-xs font-bold text-slate-400">
+                Επίλεξε από 1 έως ${maxQuickCardsPerPlayer()} κάρτες
+              </p>
+
+              <button
+                onclick="startHomeMatch('quick')"
+                class="w-full rounded-2xl bg-amber-500 px-5 py-4 font-black text-slate-950"
+              >
+                Έναρξη Quick Match
+              </button>
+            </div>
+          </div>
+        </div>
 
         <button
-          onclick="
-            S.player1Name=document.getElementById('p1Name').value||'Player 1';
-            S.player2Name=S.mode==='human'
-              ? (document.getElementById('p2Name').value||'Player 2')
-              : 'Υπολογιστής';
-            startMatch(S.mode, 'classic');
-          "
+          onclick="startHomeMatch('classic')"
           class="rounded-2xl border border-slate-700 bg-slate-800 px-5 py-4 font-black"
         >
           Classic Match · 15 vs 15
         </button>
 
-        <button
-          onclick="
-            S.player1Name=document.getElementById('p1Name').value||'Player 1';
-            S.player2Name=S.mode==='human'
-              ? (document.getElementById('p2Name').value||'Player 2')
-              : 'Υπολογιστής';
-            startMatch(S.mode, 'time');
-          "
-          class="rounded-2xl border border-amber-500 bg-slate-950 px-5 py-4 font-black text-amber-400"
-        >
-          Time Attack · 3 min
-        </button>
+        <div>
+          <button
+            id="timeAttackToggle"
+            onclick="toggleMatchSettings('time')"
+            aria-expanded="${S.timeSettingsOpen}"
+            class="w-full rounded-2xl border border-amber-500 bg-slate-950 px-5 py-4 font-black text-amber-400"
+          >
+            Time Attack
+          </button>
+
+          <div
+            id="timeAttackSettings"
+            class="match-settings ${S.timeSettingsOpen ? "is-open" : ""}"
+          >
+            <div class="mt-3 rounded-2xl border border-amber-500 bg-slate-950 p-4">
+              <label
+                for="timeAttackMinutes"
+                class="mb-2 block text-sm font-bold text-slate-300"
+              >
+                Λεπτά παιχνιδιού
+              </label>
+
+              <input
+                id="timeAttackMinutes"
+                type="number"
+                min="1"
+                max="20"
+                step="1"
+                value="${timeMinutes}"
+                oninput="clampTimeAttackInput(this, true)"
+                onchange="clampTimeAttackInput(this)"
+                onblur="clampTimeAttackInput(this)"
+                class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 font-bold outline-none focus:border-amber-400"
+              />
+
+              <p class="mt-2 mb-3 text-xs font-bold text-slate-400">
+                Επίλεξε από 1 έως 20 λεπτά
+              </p>
+
+              <button
+                onclick="startHomeMatch('time')"
+                class="w-full rounded-2xl border border-amber-500 bg-slate-950 px-5 py-4 font-black text-amber-400"
+              >
+                Έναρξη Time Attack
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -778,6 +953,7 @@ function render() {
 
 function selectDeck(deckId) {
   ACTIVE_DECK = DECKS[deckId];
+  S.quickCardsPerPlayer = quickCardsPerPlayer();
   render();
 }
 
@@ -787,6 +963,10 @@ window.DECKS = DECKS;
 window.render = render;
 window.start = start;
 window.startMatch = startMatch;
+window.startHomeMatch = startHomeMatch;
+window.toggleMatchSettings = toggleMatchSettings;
+window.clampQuickCardsInput = clampQuickCardsInput;
+window.clampTimeAttackInput = clampTimeAttackInput;
 window.pick = pick;
 window.cont = cont;
 window.botPickRandomAttribute = botPickRandomAttribute;

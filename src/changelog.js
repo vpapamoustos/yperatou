@@ -1,6 +1,19 @@
-export const APP_VERSION = "0.7a3-fix3";
+export const APP_VERSION = "0.7a4-fix1";
 export const APP_CHANGELOG = [
 {
+  version: "0.7a4-fix1",
+  changes: [
+    "Version Changes panel now starts collapsed and expands on tap."
+  ]
+},{
+  version: "0.7a4",
+  changes: [
+    "Added configurable Quick Match card count from 1 to 15 cards per player.",
+    "Added configurable Time Attack duration from 1 to 20 minutes.",
+    "Quick Match and Time Attack now open animated settings panels from the Home screen.",
+    "Added helper text and automatic limit correction for match setting inputs."
+  ]
+},{
   version: "0.7a3",
   changes: [
     "Added European Nations deck.",

@@ -9,3 +9,20 @@ body {
 button {
   -webkit-tap-highlight-color: transparent;
 }
+
+.match-settings {
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  transform: translateY(-8px);
+  transition:
+    max-height 220ms ease,
+    opacity 180ms ease,
+    transform 220ms ease;
+}
+
+.match-settings.is-open {
+  max-height: 260px;
+  opacity: 1;
+  transform: translateY(0);
+}
