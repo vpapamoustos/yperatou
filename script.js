@@ -12,6 +12,13 @@ import {
   statusLabel
 } from "./src/domain/game-history.js";
 import {
+  continueRound,
+  dealCards,
+  matchWinnerText,
+  nextScreenAfterRound,
+  resolveRound as resolveRoundResult
+} from "./src/domain/game-engine.js";
+import {
   TIME_ATTACK_MAX_MINUTES,
   TIME_ATTACK_MIN_MINUTES,
   QUICK_MATCH_MIN_CARDS,
@@ -167,18 +174,6 @@ function fmt(c, a) {
   }
 
   return Number(v).toLocaleString("el-GR") + " " + a.unit;
-}
-
-function shuffle(arr) {
-  const a = [...arr];
-
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-
-  return a;
 }
 
 function formatTime(seconds) {
@@ -925,11 +920,10 @@ function startMatch(mode, type) {
       ? quickCardsPerPlayer() * 2
       : 30;
 
-  let deck = shuffle(ACTIVE_DECK.cards).slice(0, n);
-  deck = shuffle(deck);
+  const deal = dealCards(ACTIVE_DECK.cards, n);
 
-  S.p = deck.slice(0, n / 2);
-  S.b = deck.slice(n / 2);
+  S.p = deal.player1Cards;
+  S.b = deal.player2Cards;
 
   S.pending = [];
   S.round = null;
@@ -1909,23 +1903,13 @@ function botPickRandomAttribute() {
 }
 
 function resolveRound(k, selectedBy) {
-  const a = attrs().find(x => x.key === k);
-  const pc = S.p[0];
-  const bc = S.b[0];
-  const pv = pc[k];
-  const bv = bc[k];
-
-  let w = "tie";
-
-  if (a.higherWins) {
-    if (pv > bv) w = "p";
-    else if (bv > pv) w = "b";
-  } else {
-    if (pv < bv) w = "p";
-    else if (bv < pv) w = "b";
-  }
-
-  S.round = { a, pc, bc, w, selectedBy };
+  S.round = resolveRoundResult({
+    attrs: attrs(),
+    player1Cards: S.p,
+    player2Cards: S.b,
+    attrKey: k,
+    selectedBy
+  });
   S.screen = "result";
 
   saveActiveGameSnapshot();
@@ -1934,46 +1918,33 @@ function resolveRound(k, selectedBy) {
 }
 
 function cont() {
-  const r = S.round;
-  const previousTurn = S.currentTurn;
+  const nextRoundState = continueRound({
+    round: S.round,
+    player1Cards: S.p,
+    player2Cards: S.b,
+    pendingCards: S.pending,
+    log: S.log,
+    currentTurn: S.currentTurn,
+    mode: S.mode
+  });
 
-  const pc = S.p.shift();
-  const bc = S.b.shift();
-
-  let nextTurn = "player1";
-
-  if (r.w === "tie") {
-    S.pending.push(pc, bc);
-    S.log.unshift("Ισοπαλία");
-    nextTurn = r.selectedBy;
-
-  } else if (r.w === "p") {
-    S.p.push(pc, bc, ...S.pending);
-    S.pending = [];
-    nextTurn = "player1";
-
-  } else {
-    S.b.push(bc, pc, ...S.pending);
-    S.pending = [];
-    nextTurn = S.mode === "bot" ? "bot" : "player2";
-  }
-
+  S.p = nextRoundState.player1Cards;
+  S.b = nextRoundState.player2Cards;
+  S.pending = nextRoundState.pendingCards;
+  S.log = nextRoundState.log;
   S.round = null;
-  S.currentTurn = nextTurn;
+  S.currentTurn = nextRoundState.nextTurn;
 
-  const turnChanged = previousTurn !== nextTurn;
+  S.screen = nextScreenAfterRound({
+    player1Cards: S.p,
+    player2Cards: S.b,
+    matchType: S.matchType,
+    timeExpired: S.timeExpired,
+    mode: S.mode,
+    turnChanged: nextRoundState.turnChanged
+  });
 
-  if (S.p.length === 0 || S.b.length === 0) {
-    stopTimer();
-    S.screen = "over";
-  } else if (S.matchType === "time" && S.timeExpired) {
-    stopTimer();
-    S.screen = "over";
-  } else if (S.mode === "human" && turnChanged) {
-    S.screen = "handoff";
-  } else {
-    S.screen = "game";
-  }
+  if (S.screen === "over") stopTimer();
 
   saveActiveGameSnapshot();
   render();
@@ -2069,15 +2040,7 @@ function over() {
   const p1Cards = S.p.length;
   const p2Cards = S.b.length;
 
-  let winnerText = "";
-
-  if (p1Cards > p2Cards) {
-    winnerText = `Κέρδισε ο/η ${S.player1Name} !`;
-  } else if (p2Cards > p1Cards) {
-    winnerText = `Κέρδισε ο/η ${S.player2Name} !`;
-  } else {
-    winnerText = "Ισοπαλία!";
-  }
+  const winnerText = matchWinnerText(S.player1Name, S.player2Name, S.p, S.b);
 
   app.innerHTML = h() + `
     <section class="rounded-[2rem] border border-slate-800 bg-slate-900 p-6 text-center">

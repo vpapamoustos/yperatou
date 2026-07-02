@@ -1,6 +1,15 @@
-export const APP_VERSION = "0.8a7";
+export const APP_VERSION = "0.8a8";
 export const APP_CHANGELOG = [
 {
+  version: "0.8a8",
+  changes: [
+    "Extracted core game engine helpers into a dedicated game engine domain module.",
+    "Moved card shuffling and match dealing out of the main script.",
+    "Moved round resolution, card movement and next-turn calculation out of the main script.",
+    "Centralized next-screen decisions after each round, including handoff and Time Attack end conditions.",
+    "Moved final match winner text calculation into the game engine domain."
+  ]
+},{
   version: "0.8a7",
   changes: [
     "Extracted game history record builders, snapshots and status update helpers into a dedicated game history domain module.",
