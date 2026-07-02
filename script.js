@@ -1,278 +1,17 @@
 import { APP_VERSION, APP_CHANGELOG } from "./src/changelog.js";
-import { DECKS } from "./src/data.js";
+import { getDeck, getDeckAttrs, getDefaultDeck, listDecks } from "./src/domain/decks.js";
 import { S } from "./src/state.js";
+import { gameHistoryStore } from "./src/storage/game-history-store.js";
+import { normalizeProfileName, profileStore } from "./src/storage/profile-store.js";
+import { actionValue, escapeHtml, formatDateTime, readActionValue } from "./src/ui/html.js";
+import { iconCards, iconList, iconRefresh, iconUsers } from "./src/ui/icons.js";
 
-let ACTIVE_DECK = DECKS.europe;
+let ACTIVE_DECK = getDefaultDeck();
 
 function attrs() {
-  return ACTIVE_DECK.attrs;
+  return getDeckAttrs(ACTIVE_DECK);
 }
-
 const app = document.getElementById("app");
-const PROFILE_STORAGE_KEY = "yperatou.playerProfiles.v1";
-const GAME_HISTORY_STORAGE_KEY = "yperatou.gameHistory.v1";
-
-const profileStore = {
-  list() {
-    try {
-      const savedProfiles = JSON.parse(localStorage.getItem(PROFILE_STORAGE_KEY) || "[]");
-
-      if (!Array.isArray(savedProfiles)) return [];
-
-      return savedProfiles
-        .map(profile => normalizeProfileName(profile?.name ?? profile))
-        .filter(Boolean);
-    } catch {
-      return [];
-    }
-  },
-
-  save(profiles) {
-    try {
-      localStorage.setItem(
-        PROFILE_STORAGE_KEY,
-        JSON.stringify(profiles.map(name => ({ name })))
-      );
-
-      return true;
-    } catch {
-      return false;
-    }
-  },
-
-  create(name) {
-    const normalizedName = normalizeProfileName(name);
-
-    if (!normalizedName) {
-      return { ok: false, message: "Συμπλήρωσε όνομα προφίλ." };
-    }
-
-    const profiles = this.list();
-    const duplicate = profiles.some(profileName => (
-      profileName.toLocaleLowerCase("el-GR") === normalizedName.toLocaleLowerCase("el-GR")
-    ));
-
-    if (duplicate) {
-      return { ok: false, message: "Υπάρχει ήδη προφίλ με αυτό το όνομα." };
-    }
-
-    const nextProfiles = [...profiles, normalizedName].sort((a, b) => (
-      a.localeCompare(b, "el-GR")
-    ));
-
-    if (!this.save(nextProfiles)) {
-      return { ok: false, message: "Δεν ήταν δυνατή η αποθήκευση του προφίλ." };
-    }
-
-    return { ok: true, profileName: normalizedName, profiles: nextProfiles };
-  },
-
-  rename(currentName, nextName) {
-    const normalizedCurrentName = normalizeProfileName(currentName);
-    const normalizedNextName = normalizeProfileName(nextName);
-
-    if (!normalizedNextName) {
-      return { ok: false, message: "Συμπλήρωσε όνομα προφίλ." };
-    }
-
-    const profiles = this.list();
-
-    if (!profiles.includes(normalizedCurrentName)) {
-      return { ok: false, message: "Το προφίλ δεν βρέθηκε." };
-    }
-
-    const duplicate = profiles.some(profileName => (
-      profileName !== normalizedCurrentName
-      && profileName.toLocaleLowerCase("el-GR") === normalizedNextName.toLocaleLowerCase("el-GR")
-    ));
-
-    if (duplicate) {
-      return { ok: false, message: "Υπάρχει ήδη προφίλ με αυτό το όνομα." };
-    }
-
-    const nextProfiles = profiles
-      .map(profileName => profileName === normalizedCurrentName ? normalizedNextName : profileName)
-      .sort((a, b) => a.localeCompare(b, "el-GR"));
-
-    if (!this.save(nextProfiles)) {
-      return { ok: false, message: "Δεν ήταν δυνατή η αποθήκευση του προφίλ." };
-    }
-
-    return { ok: true, profileName: normalizedNextName, profiles: nextProfiles };
-  },
-
-  delete(name) {
-    const normalizedName = normalizeProfileName(name);
-    const profiles = this.list();
-    const nextProfiles = profiles.filter(profileName => profileName !== normalizedName);
-
-    if (nextProfiles.length === profiles.length) {
-      return { ok: false, message: "Το προφίλ δεν βρέθηκε." };
-    }
-
-    if (!this.save(nextProfiles)) {
-      return { ok: false, message: "Δεν ήταν δυνατή η διαγραφή του προφίλ." };
-    }
-
-    return { ok: true, profiles: nextProfiles };
-  }
-};
-
-const gameHistoryStore = {
-  list() {
-    try {
-      const savedGames = JSON.parse(localStorage.getItem(GAME_HISTORY_STORAGE_KEY) || "[]");
-
-      if (!Array.isArray(savedGames)) return [];
-
-      return savedGames.filter(game => game && game.id);
-    } catch {
-      return [];
-    }
-  },
-
-  save(games) {
-    try {
-      localStorage.setItem(GAME_HISTORY_STORAGE_KEY, JSON.stringify(games));
-      return true;
-    } catch {
-      return false;
-    }
-  },
-
-  upsert(game) {
-    const games = this.list();
-    const existingIndex = games.findIndex(savedGame => savedGame.id === game.id);
-
-    if (existingIndex >= 0) {
-      games[existingIndex] = game;
-    } else {
-      games.unshift(game);
-    }
-
-    this.save(games);
-    return game;
-  },
-
-  update(id, updater) {
-    const games = this.list();
-    const index = games.findIndex(game => game.id === id);
-
-    if (index < 0) return null;
-
-    const updatedGame = updater(games[index]);
-    games[index] = updatedGame;
-    this.save(games);
-
-    return updatedGame;
-  },
-
-  find(id) {
-    return this.list().find(game => game.id === id) || null;
-  },
-
-  renameProfile(currentName, nextName) {
-    const games = this.list().map(game => {
-      const players = (game.players || []).map(player => (
-        player.type === "profile" && player.name === currentName
-          ? { ...player, name: nextName, profileName: nextName }
-          : player
-      ));
-
-      return {
-        ...game,
-        players,
-        playerNames: (game.playerNames || []).map(name => (
-          name === currentName ? nextName : name
-        )),
-        uniquenessKey: gameRecordUniquenessKey(game, players)
-      };
-    });
-
-    this.save(games);
-    return games;
-  },
-
-  deleteByProfile(name) {
-    const games = this.list().filter(game => !(game.players || []).some(player => (
-      player.type === "profile" && player.name === name
-    )));
-
-    this.save(games);
-    return games;
-  }
-};
-
-function normalizeProfileName(name) {
-  return String(name || "")
-    .replace(/[<>]/g, "")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 32);
-}
-
-function escapeHtml(value) {
-  return String(value)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
-
-function actionValue(value) {
-  return encodeURIComponent(value)
-    .replace(/'/g, "%27")
-    .replace(/\(/g, "%28")
-    .replace(/\)/g, "%29");
-}
-
-function readActionValue(value) {
-  return decodeURIComponent(value);
-}
-
-function iconCards(className = "h-8 w-8") {
-  return `
-    <svg class="${className}" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <rect x="5" y="4" width="10" height="14" rx="2" stroke="currentColor" stroke-width="2" />
-      <rect x="9" y="7" width="10" height="14" rx="2" stroke="currentColor" stroke-width="2" />
-      <path d="M12 12h4M14 10v4" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-    </svg>
-  `;
-}
-
-function iconList(className = "h-8 w-8") {
-  return `
-    <svg class="${className}" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M9 7h10M9 12h10M9 17h10" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-      <circle cx="5" cy="7" r="1.5" fill="currentColor" />
-      <circle cx="5" cy="12" r="1.5" fill="currentColor" />
-      <circle cx="5" cy="17" r="1.5" fill="currentColor" />
-    </svg>
-  `;
-}
-
-function iconUsers(className = "h-8 w-8") {
-  return `
-    <svg class="${className}" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <circle cx="9" cy="8" r="3" stroke="currentColor" stroke-width="2" />
-      <path d="M3.5 19c.8-3.2 2.7-5 5.5-5s4.7 1.8 5.5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-      <circle cx="17" cy="9" r="2.2" stroke="currentColor" stroke-width="2" />
-      <path d="M14.8 14.4c2.7.2 4.5 1.7 5.2 4.6" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-    </svg>
-  `;
-}
-
-function iconRefresh(className = "h-8 w-8") {
-  return `
-    <svg class="${className}" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M20 7v5h-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-      <path d="M4 17v-5h5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-      <path d="M18.2 9A7 7 0 0 0 6.4 6.9L4 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-      <path d="M5.8 15A7 7 0 0 0 17.6 17.1L20 15" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-    </svg>
-  `;
-}
 
 function gameId() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
@@ -318,15 +57,6 @@ function backButton() {
 
 function cloneStateValue(value) {
   return JSON.parse(JSON.stringify(value));
-}
-
-function formatDateTime(value) {
-  if (!value) return "-";
-
-  return new Date(value).toLocaleString("el-GR", {
-    dateStyle: "short",
-    timeStyle: "short"
-  });
 }
 
 function loadProfiles() {
@@ -691,10 +421,6 @@ function gameUniquenessKey(identities = S.playerIdentities) {
   return `${ACTIVE_DECK.id}::${playerPairKey(identities)}`;
 }
 
-function gameRecordUniquenessKey(game, identities = game.players || []) {
-  return `${game.deckId}::${playerPairKey(identities)}`;
-}
-
 function scoreSnapshot() {
   return {
     player1Cards: S.p.length,
@@ -890,7 +616,7 @@ function resumeGame(id) {
 
   stopTimer();
 
-  ACTIVE_DECK = DECKS[game.deckId] || ACTIVE_DECK;
+  ACTIVE_DECK = getDeck(game.deckId, ACTIVE_DECK.id);
   S.currentGameId = game.id;
   S.currentGameStartedAt = game.startedAt;
   S.mode = game.mode;
@@ -1536,7 +1262,7 @@ function gameHistory() {
   ].join("");
   const deckOptions = [
     optionHtml("all", "Όλα τα decks", S.historyDeckFilter),
-    ...Object.values(DECKS).map(deck => optionHtml(deck.id, deck.title, S.historyDeckFilter))
+    ...listDecks().map(deck => optionHtml(deck.id, deck.title, S.historyDeckFilter))
   ].join("");
 
   app.innerHTML = h() + `
@@ -1896,6 +1622,11 @@ function homeMenu() {
 function newGame() {
   const quickCards = quickCardsPerPlayer();
   const timeMinutes = timeAttackMinutes();
+  const deckOptions = listDecks().map(deck => `
+    <option value="${deck.id}" ${ACTIVE_DECK.id === deck.id ? "selected" : ""}>
+      ${escapeHtml(deck.title)}
+    </option>
+  `).join("");
 
   app.innerHTML = h() + `
     ${backButton()}
@@ -1912,9 +1643,7 @@ function newGame() {
           onchange="selectDeck(this.value)"
           class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 font-bold text-white outline-none focus:border-amber-400"
         >
-          <option value="europe" ${ACTIVE_DECK.id === "europe" ? "selected" : ""}>Χώρες της Ευρώπης</option>
-          <option value="performance" ${ACTIVE_DECK.id === "performance" ? "selected" : ""}>Performance Legends</option>
-          <option value="space" ${ACTIVE_DECK.id === "space" ? "selected" : ""}>Cosmic Legends</option>
+          ${deckOptions}
         </select>
       </div>
 
@@ -2359,13 +2088,12 @@ function render() {
 }
 
 function selectDeck(deckId) {
-  ACTIVE_DECK = DECKS[deckId];
+  ACTIVE_DECK = getDeck(deckId, ACTIVE_DECK.id);
   S.quickCardsPerPlayer = quickCardsPerPlayer();
   render();
 }
 
 window.S = S;
-window.DECKS = DECKS;
 
 window.navigate = navigate;
 window.render = render;

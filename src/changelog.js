@@ -1,6 +1,16 @@
-export const APP_VERSION = "0.8a3";
+export const APP_VERSION = "0.8a4";
 export const APP_CHANGELOG = [
 {
+  version: "0.8a4",
+  changes: [
+    "Extracted profile storage into a dedicated local profile store module.",
+    "Extracted game history persistence into a dedicated local game history store module.",
+    "Moved shared HTML, action value and date formatting helpers into UI helper modules.",
+    "Moved Home menu SVG icons into a dedicated UI icons module.",
+    "Added an initial decks domain module for deck lookup, listing and active deck attributes.",
+    "Reduced the size of the main script to prepare for future online storage, mobile support and deck-domain refactoring."
+  ]
+},{
   version: "0.8a3",
   changes: [
     "Added profile edit and delete actions to Profile Management.",
