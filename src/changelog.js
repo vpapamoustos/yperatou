@@ -1,6 +1,55 @@
-export const APP_VERSION = "0.7a4-fix1";
+export const APP_VERSION = "0.8a3";
 export const APP_CHANGELOG = [
 {
+  version: "0.8a3",
+  changes: [
+    "Added profile edit and delete actions to Profile Management.",
+    "Profile rename now updates related game history player names and uniqueness keys.",
+    "Profile deletion now removes related game history records.",
+    "Added a clear filters icon button to Game History.",
+    "Updated Home menu icons with larger cards, list, users and refresh symbols."
+  ]
+},{
+  version: "0.8a2-fix1",
+  changes: [
+    "Updated the Home menu to use square icon cards instead of stacked text buttons."
+  ]
+},{
+  version: "0.8a2",
+  changes: [
+    "Reworked the Home screen into a central menu hub.",
+    "Moved New Game setup into its own screen.",
+    "Moved Game History into its own screen.",
+    "Added Game History filters for player name, game status and deck.",
+    "Added a dedicated Profiles screen for profile listing and creation.",
+    "Moved Version Changes into its own screen.",
+    "Updated navigation so future Leaderboards, Decks and Settings screens can be added cleanly."
+  ]
+},{
+  version: "0.8a1",
+  changes: [
+    "Added unified local game history for active, paused, completed, abandoned and superseded games.",
+    "Every started game now creates a history record, including guest games.",
+    "Added player identity metadata for profile, guest and bot players in game history records.",
+    "Added automatic active-game snapshots after round selection and round continuation.",
+    "Added Pause Game for profile-only matches against the bot or another profile.",
+    "Paused games store deck, match type, player identities, card order, pending pile, round state, turn order, score and Time Attack time left.",
+    "Added duplicate paused-game detection per deck and player pairing.",
+    "Added an in-app confirmation screen for replacing an existing paused game.",
+    "Replaced the Home saved-games idea with a collapsed Game History panel.",
+    "Game History shows all statuses and allows Resume for paused and active auto-saved games.",
+    "Exit Match now records abandoned games for future leaderboard and history features."
+  ]
+},{
+  version: "0.7a5",
+  changes: [
+    "Added local player profiles stored in localStorage.",
+    "Added profile dropdowns, inline profile creation and guest play for Player 1 and Player 2.",
+    "Profile, profile creation and guest setup modes now show only their relevant fields.",
+    "Match setup now resolves player identities before starting the game engine.",
+    "Profile storage is isolated behind a small service layer for future online persistence."
+  ]
+},{
   version: "0.7a4-fix1",
   changes: [
     "Version Changes panel now starts collapsed and expands on tap."

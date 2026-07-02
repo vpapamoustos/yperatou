@@ -9,6 +9,348 @@ function attrs() {
 }
 
 const app = document.getElementById("app");
+const PROFILE_STORAGE_KEY = "yperatou.playerProfiles.v1";
+const GAME_HISTORY_STORAGE_KEY = "yperatou.gameHistory.v1";
+
+const profileStore = {
+  list() {
+    try {
+      const savedProfiles = JSON.parse(localStorage.getItem(PROFILE_STORAGE_KEY) || "[]");
+
+      if (!Array.isArray(savedProfiles)) return [];
+
+      return savedProfiles
+        .map(profile => normalizeProfileName(profile?.name ?? profile))
+        .filter(Boolean);
+    } catch {
+      return [];
+    }
+  },
+
+  save(profiles) {
+    try {
+      localStorage.setItem(
+        PROFILE_STORAGE_KEY,
+        JSON.stringify(profiles.map(name => ({ name })))
+      );
+
+      return true;
+    } catch {
+      return false;
+    }
+  },
+
+  create(name) {
+    const normalizedName = normalizeProfileName(name);
+
+    if (!normalizedName) {
+      return { ok: false, message: "Συμπλήρωσε όνομα προφίλ." };
+    }
+
+    const profiles = this.list();
+    const duplicate = profiles.some(profileName => (
+      profileName.toLocaleLowerCase("el-GR") === normalizedName.toLocaleLowerCase("el-GR")
+    ));
+
+    if (duplicate) {
+      return { ok: false, message: "Υπάρχει ήδη προφίλ με αυτό το όνομα." };
+    }
+
+    const nextProfiles = [...profiles, normalizedName].sort((a, b) => (
+      a.localeCompare(b, "el-GR")
+    ));
+
+    if (!this.save(nextProfiles)) {
+      return { ok: false, message: "Δεν ήταν δυνατή η αποθήκευση του προφίλ." };
+    }
+
+    return { ok: true, profileName: normalizedName, profiles: nextProfiles };
+  },
+
+  rename(currentName, nextName) {
+    const normalizedCurrentName = normalizeProfileName(currentName);
+    const normalizedNextName = normalizeProfileName(nextName);
+
+    if (!normalizedNextName) {
+      return { ok: false, message: "Συμπλήρωσε όνομα προφίλ." };
+    }
+
+    const profiles = this.list();
+
+    if (!profiles.includes(normalizedCurrentName)) {
+      return { ok: false, message: "Το προφίλ δεν βρέθηκε." };
+    }
+
+    const duplicate = profiles.some(profileName => (
+      profileName !== normalizedCurrentName
+      && profileName.toLocaleLowerCase("el-GR") === normalizedNextName.toLocaleLowerCase("el-GR")
+    ));
+
+    if (duplicate) {
+      return { ok: false, message: "Υπάρχει ήδη προφίλ με αυτό το όνομα." };
+    }
+
+    const nextProfiles = profiles
+      .map(profileName => profileName === normalizedCurrentName ? normalizedNextName : profileName)
+      .sort((a, b) => a.localeCompare(b, "el-GR"));
+
+    if (!this.save(nextProfiles)) {
+      return { ok: false, message: "Δεν ήταν δυνατή η αποθήκευση του προφίλ." };
+    }
+
+    return { ok: true, profileName: normalizedNextName, profiles: nextProfiles };
+  },
+
+  delete(name) {
+    const normalizedName = normalizeProfileName(name);
+    const profiles = this.list();
+    const nextProfiles = profiles.filter(profileName => profileName !== normalizedName);
+
+    if (nextProfiles.length === profiles.length) {
+      return { ok: false, message: "Το προφίλ δεν βρέθηκε." };
+    }
+
+    if (!this.save(nextProfiles)) {
+      return { ok: false, message: "Δεν ήταν δυνατή η διαγραφή του προφίλ." };
+    }
+
+    return { ok: true, profiles: nextProfiles };
+  }
+};
+
+const gameHistoryStore = {
+  list() {
+    try {
+      const savedGames = JSON.parse(localStorage.getItem(GAME_HISTORY_STORAGE_KEY) || "[]");
+
+      if (!Array.isArray(savedGames)) return [];
+
+      return savedGames.filter(game => game && game.id);
+    } catch {
+      return [];
+    }
+  },
+
+  save(games) {
+    try {
+      localStorage.setItem(GAME_HISTORY_STORAGE_KEY, JSON.stringify(games));
+      return true;
+    } catch {
+      return false;
+    }
+  },
+
+  upsert(game) {
+    const games = this.list();
+    const existingIndex = games.findIndex(savedGame => savedGame.id === game.id);
+
+    if (existingIndex >= 0) {
+      games[existingIndex] = game;
+    } else {
+      games.unshift(game);
+    }
+
+    this.save(games);
+    return game;
+  },
+
+  update(id, updater) {
+    const games = this.list();
+    const index = games.findIndex(game => game.id === id);
+
+    if (index < 0) return null;
+
+    const updatedGame = updater(games[index]);
+    games[index] = updatedGame;
+    this.save(games);
+
+    return updatedGame;
+  },
+
+  find(id) {
+    return this.list().find(game => game.id === id) || null;
+  },
+
+  renameProfile(currentName, nextName) {
+    const games = this.list().map(game => {
+      const players = (game.players || []).map(player => (
+        player.type === "profile" && player.name === currentName
+          ? { ...player, name: nextName, profileName: nextName }
+          : player
+      ));
+
+      return {
+        ...game,
+        players,
+        playerNames: (game.playerNames || []).map(name => (
+          name === currentName ? nextName : name
+        )),
+        uniquenessKey: gameRecordUniquenessKey(game, players)
+      };
+    });
+
+    this.save(games);
+    return games;
+  },
+
+  deleteByProfile(name) {
+    const games = this.list().filter(game => !(game.players || []).some(player => (
+      player.type === "profile" && player.name === name
+    )));
+
+    this.save(games);
+    return games;
+  }
+};
+
+function normalizeProfileName(name) {
+  return String(name || "")
+    .replace(/[<>]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 32);
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function actionValue(value) {
+  return encodeURIComponent(value)
+    .replace(/'/g, "%27")
+    .replace(/\(/g, "%28")
+    .replace(/\)/g, "%29");
+}
+
+function readActionValue(value) {
+  return decodeURIComponent(value);
+}
+
+function iconCards(className = "h-8 w-8") {
+  return `
+    <svg class="${className}" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <rect x="5" y="4" width="10" height="14" rx="2" stroke="currentColor" stroke-width="2" />
+      <rect x="9" y="7" width="10" height="14" rx="2" stroke="currentColor" stroke-width="2" />
+      <path d="M12 12h4M14 10v4" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+    </svg>
+  `;
+}
+
+function iconList(className = "h-8 w-8") {
+  return `
+    <svg class="${className}" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M9 7h10M9 12h10M9 17h10" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+      <circle cx="5" cy="7" r="1.5" fill="currentColor" />
+      <circle cx="5" cy="12" r="1.5" fill="currentColor" />
+      <circle cx="5" cy="17" r="1.5" fill="currentColor" />
+    </svg>
+  `;
+}
+
+function iconUsers(className = "h-8 w-8") {
+  return `
+    <svg class="${className}" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle cx="9" cy="8" r="3" stroke="currentColor" stroke-width="2" />
+      <path d="M3.5 19c.8-3.2 2.7-5 5.5-5s4.7 1.8 5.5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+      <circle cx="17" cy="9" r="2.2" stroke="currentColor" stroke-width="2" />
+      <path d="M14.8 14.4c2.7.2 4.5 1.7 5.2 4.6" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+    </svg>
+  `;
+}
+
+function iconRefresh(className = "h-8 w-8") {
+  return `
+    <svg class="${className}" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M20 7v5h-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+      <path d="M4 17v-5h5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+      <path d="M18.2 9A7 7 0 0 0 6.4 6.9L4 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+      <path d="M5.8 15A7 7 0 0 0 17.6 17.1L20 15" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+    </svg>
+  `;
+}
+
+function gameId() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+
+  return `game-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function isGameScreen() {
+  return ["game", "result", "handoff", "over", "pauseConfirm"].includes(S.screen);
+}
+
+function screenTitle() {
+  const titles = {
+    homeMenu: "Υπερατού Game",
+    newGame: "Νέο παιχνίδι",
+    gameHistory: "Ιστορικό παιχνιδιών",
+    profiles: "Προφίλ παικτών",
+    versionChanges: "Version Changes"
+  };
+
+  return isGameScreen() ? ACTIVE_DECK.title : titles[S.screen] || "Υπερατού Game";
+}
+
+function navigate(screen) {
+  S.screen = screen;
+  render();
+}
+
+function backButton() {
+  return `
+    <button
+      onclick="navigate('homeMenu')"
+      class="mb-4 w-full rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-sm font-bold text-slate-300"
+    >
+      Πίσω
+    </button>
+  `;
+}
+
+function cloneStateValue(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function formatDateTime(value) {
+  if (!value) return "-";
+
+  return new Date(value).toLocaleString("el-GR", {
+    dateStyle: "short",
+    timeStyle: "short"
+  });
+}
+
+function loadProfiles() {
+  S.profiles = profileStore.list();
+
+  if (S.profiles.length > 0) {
+    if (!S.player1ProfileName) S.player1ProfileName = S.profiles[0];
+    if (!S.player2ProfileName) S.player2ProfileName = S.profiles[0];
+    if (S.player1SetupMode === "guest" && S.player1GuestName === "Παίκτης 1") {
+      S.player1SetupMode = "profile";
+    }
+    if (S.player2SetupMode === "guest" && S.player2GuestName === "Παίκτης 2") {
+      S.player2SetupMode = "profile";
+    }
+  }
+}
+
+loadProfiles();
+
+function loadGameHistory() {
+  S.gameHistory = gameHistoryStore.list();
+}
+
+loadGameHistory();
 
 function money(n) {
   return "€" + Number(n).toLocaleString("el-GR");
@@ -132,11 +474,458 @@ function clampTimeAttackInput(input, allowEmpty = false) {
   S.timeAttackMinutes = clampNumberInput(input, 1, 20, timeAttackMinutes(), allowEmpty);
 }
 
+function profileOptions(selectedName) {
+  if (S.profiles.length === 0) {
+    return `<option value="">Δεν υπάρχουν αποθηκευμένα προφίλ</option>`;
+  }
+
+  return S.profiles.map(profileName => `
+    <option value="${escapeHtml(profileName)}" ${profileName === selectedName ? "selected" : ""}>
+      ${escapeHtml(profileName)}
+    </option>
+  `).join("");
+}
+
+function ensurePlayerProfileSelection(playerNumber) {
+  const profileKey = `player${playerNumber}ProfileName`;
+  const modeKey = `player${playerNumber}SetupMode`;
+
+  if (S.profiles.length === 0 && S[modeKey] !== "create") {
+    S[modeKey] = "guest";
+    S[profileKey] = "";
+    return;
+  }
+
+  if (!S.profiles.includes(S[profileKey])) {
+    S[profileKey] = S.profiles[0];
+  }
+}
+
+function playerDisplayName(playerNumber) {
+  const modeKey = `player${playerNumber}SetupMode`;
+  const profileKey = `player${playerNumber}ProfileName`;
+  const guestKey = `player${playerNumber}GuestName`;
+  const fallback = `Player ${playerNumber}`;
+
+  if (S[modeKey] === "profile" && S.profiles.includes(S[profileKey])) {
+    return S[profileKey];
+  }
+
+  return normalizeProfileName(S[guestKey]) || fallback;
+}
+
+function playerIdentity(playerNumber) {
+  const modeKey = `player${playerNumber}SetupMode`;
+  const profileKey = `player${playerNumber}ProfileName`;
+  const guestKey = `player${playerNumber}GuestName`;
+  const name = playerDisplayName(playerNumber);
+
+  if (S[modeKey] === "profile" && S.profiles.includes(S[profileKey])) {
+    return {
+      type: "profile",
+      name,
+      profileName: name
+    };
+  }
+
+  return {
+    type: "guest",
+    name
+  };
+}
+
+function botIdentity() {
+  return {
+    type: "bot",
+    name: "Υπολογιστής"
+  };
+}
+
+function resolvePlayerIdentities() {
+  const player1Identity = playerIdentity(1);
+  const player2Identity = S.mode === "human"
+    ? playerIdentity(2)
+    : botIdentity();
+
+  S.playerIdentities = [player1Identity, player2Identity];
+}
+
+function playerSetupPanel(playerNumber) {
+  ensurePlayerProfileSelection(playerNumber);
+
+  const modeKey = `player${playerNumber}SetupMode`;
+  const profileKey = `player${playerNumber}ProfileName`;
+  const guestKey = `player${playerNumber}GuestName`;
+  const newProfileKey = `player${playerNumber}NewProfileName`;
+  const isProfileMode = S[modeKey] === "profile";
+  const isCreateMode = S[modeKey] === "create";
+  const isGuestMode = S[modeKey] === "guest";
+  const label = `Παίκτης ${playerNumber}`;
+
+  return `
+    <div class="mb-5 rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
+      <label class="mb-2 block text-sm font-bold text-slate-300">
+        ${label}
+      </label>
+
+      <div class="grid gap-3">
+        <button
+          onclick="setPlayerSetupMode(${playerNumber}, 'profile')"
+          ${S.profiles.length === 0 ? "disabled" : ""}
+          class="rounded-2xl px-4 py-3 font-black disabled:border disabled:border-slate-800 disabled:bg-slate-900 disabled:text-slate-600 ${
+            isProfileMode
+              ? "bg-amber-500 text-slate-950"
+              : "border border-slate-700 bg-slate-800 text-white"
+          }"
+        >
+          Χρήση προφίλ
+        </button>
+
+        <button
+          onclick="toggleCreateProfile(${playerNumber})"
+          class="rounded-2xl px-4 py-3 font-black ${
+            isCreateMode
+              ? "bg-amber-500 text-slate-950"
+              : "border border-amber-500 bg-slate-950 text-amber-400"
+          }"
+        >
+          Δημιουργία προφίλ
+        </button>
+
+        <button
+          onclick="setPlayerSetupMode(${playerNumber}, 'guest')"
+          class="rounded-2xl px-4 py-3 font-black ${
+            isGuestMode
+              ? "bg-amber-500 text-slate-950"
+              : "border border-slate-700 bg-slate-800 text-white"
+          }"
+        >
+          Παιχνίδι ως επισκέπτης
+        </button>
+      </div>
+
+      ${
+        isProfileMode
+          ? `
+            <select
+              onchange="selectPlayerProfile(${playerNumber}, this.value)"
+              class="mt-3 w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 font-bold text-white outline-none focus:border-amber-400"
+            >
+              ${profileOptions(S[profileKey])}
+            </select>
+
+            <p class="mt-3 text-xs font-bold text-slate-400">
+              Επιλεγμένο προφίλ: ${escapeHtml(S[profileKey])}
+            </p>
+          `
+          : ""
+      }
+
+      ${
+        isGuestMode
+          ? `
+            <input
+              value="${escapeHtml(S[guestKey])}"
+              oninput="setGuestName(${playerNumber}, this.value)"
+              class="mt-3 w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 outline-none focus:border-amber-400"
+            />
+          `
+          : ""
+      }
+
+      ${
+        isCreateMode
+          ? `
+            <div class="mt-3 rounded-2xl border border-slate-700 bg-slate-900 p-4">
+              <label class="mb-2 block text-sm font-bold text-slate-300">
+                Όνομα νέου προφίλ
+              </label>
+
+              <input
+                value="${escapeHtml(S[newProfileKey])}"
+                oninput="setNewProfileName(${playerNumber}, this.value)"
+                class="mb-3 w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 outline-none focus:border-amber-400"
+              />
+
+              <button
+                onclick="saveNewProfile(${playerNumber})"
+                class="w-full rounded-2xl bg-amber-500 px-4 py-3 font-black text-slate-950"
+              >
+                Αποθήκευση προφίλ
+              </button>
+            </div>
+          `
+          : ""
+      }
+
+      ${
+        S.profileMessage
+          ? `
+            <p class="mt-3 text-xs font-bold text-amber-300">
+              ${escapeHtml(S.profileMessage)}
+            </p>
+          `
+          : ""
+      }
+    </div>
+  `;
+}
+
 function applyPlayerNames() {
-  S.player1Name = document.getElementById("p1Name").value || "Player 1";
+  resolvePlayerIdentities();
+  S.player1Name = escapeHtml(playerDisplayName(1));
   S.player2Name = S.mode === "human"
-    ? (document.getElementById("p2Name").value || "Player 2")
+    ? escapeHtml(playerDisplayName(2))
     : "Υπολογιστής";
+}
+
+function playerPairKey(identities = S.playerIdentities) {
+  const pair = identities.map(identity => (
+    `${identity.type}:${normalizeProfileName(identity.profileName || identity.name).toLocaleLowerCase("el-GR")}`
+  ));
+
+  return pair.sort().join("|");
+}
+
+function gameUniquenessKey(identities = S.playerIdentities) {
+  return `${ACTIVE_DECK.id}::${playerPairKey(identities)}`;
+}
+
+function gameRecordUniquenessKey(game, identities = game.players || []) {
+  return `${game.deckId}::${playerPairKey(identities)}`;
+}
+
+function scoreSnapshot() {
+  return {
+    player1Cards: S.p.length,
+    player2Cards: S.b.length,
+    pendingCards: S.pending.length
+  };
+}
+
+function matchSnapshot() {
+  return {
+    p: cloneStateValue(S.p),
+    b: cloneStateValue(S.b),
+    pending: cloneStateValue(S.pending),
+    round: cloneStateValue(S.round),
+    log: cloneStateValue(S.log),
+    currentTurn: S.currentTurn,
+    screen: S.screen,
+    timeLeft: S.timeLeft,
+    timeExpired: S.timeExpired,
+    score: scoreSnapshot()
+  };
+}
+
+function currentGameBase(status) {
+  const now = nowIso();
+
+  return {
+    id: S.currentGameId,
+    status,
+    statusUpdatedAt: now,
+    startedAt: S.currentGameStartedAt,
+    lastSavedAt: now,
+    deckId: ACTIVE_DECK.id,
+    deckTitle: ACTIVE_DECK.title,
+    mode: S.mode,
+    matchType: S.matchType,
+    uniquenessKey: gameUniquenessKey(),
+    players: cloneStateValue(S.playerIdentities),
+    playerNames: [S.player1Name, S.player2Name],
+    snapshot: matchSnapshot()
+  };
+}
+
+function syncGameHistory() {
+  S.gameHistory = gameHistoryStore.list();
+}
+
+function createActiveGameRecord() {
+  const startedAt = nowIso();
+
+  S.currentGameId = gameId();
+  S.currentGameStartedAt = startedAt;
+
+  gameHistoryStore.upsert({
+    ...currentGameBase("active"),
+    startedAt,
+    createdAt: startedAt
+  });
+
+  syncGameHistory();
+}
+
+function saveActiveGameSnapshot() {
+  if (!S.currentGameId) return;
+
+  gameHistoryStore.update(S.currentGameId, game => ({
+    ...game,
+    ...currentGameBase("active"),
+    createdAt: game.createdAt || game.startedAt || S.currentGameStartedAt
+  }));
+
+  syncGameHistory();
+}
+
+function updateCurrentGameStatus(status, extra = {}) {
+  if (!S.currentGameId) return;
+
+  const statusTime = nowIso();
+
+  gameHistoryStore.update(S.currentGameId, game => ({
+    ...game,
+    ...currentGameBase(status),
+    ...extra,
+    createdAt: game.createdAt || game.startedAt || S.currentGameStartedAt,
+    status,
+    statusUpdatedAt: statusTime,
+    lastSavedAt: statusTime
+  }));
+
+  syncGameHistory();
+}
+
+function canPauseCurrentGame() {
+  if (!S.currentGameId) return false;
+
+  const humanPlayers = S.mode === "human"
+    ? S.playerIdentities
+    : [S.playerIdentities[0]];
+
+  return humanPlayers.every(identity => identity?.type === "profile");
+}
+
+function conflictingPausedGame() {
+  const key = gameUniquenessKey();
+
+  return gameHistoryStore
+    .list()
+    .find(game => (
+      game.id !== S.currentGameId
+      && game.status === "paused"
+      && game.uniquenessKey === key
+    ));
+}
+
+function exitMatch() {
+  stopTimer();
+  updateCurrentGameStatus("abandoned", { endedAt: nowIso() });
+  S.currentGameId = null;
+  S.currentGameStartedAt = null;
+  S.screen = "homeMenu";
+  render();
+}
+
+function returnToHomeMenu() {
+  stopTimer();
+  S.currentGameId = null;
+  S.currentGameStartedAt = null;
+  S.screen = "homeMenu";
+  render();
+}
+
+function completeCurrentGame() {
+  const game = gameHistoryStore.find(S.currentGameId);
+
+  if (!game || game.status === "completed") return;
+
+  updateCurrentGameStatus("completed", { endedAt: nowIso() });
+}
+
+function pauseCurrentGame() {
+  if (!canPauseCurrentGame()) return;
+
+  stopTimer();
+
+  const conflict = conflictingPausedGame();
+
+  if (conflict) {
+    S.pendingPauseGameId = conflict.id;
+    S.pauseReturnScreen = S.screen;
+    S.screen = "pauseConfirm";
+    render();
+    return;
+  }
+
+  savePausedGame();
+}
+
+function savePausedGame() {
+  updateCurrentGameStatus("paused", { pausedAt: nowIso() });
+  S.currentGameId = null;
+  S.currentGameStartedAt = null;
+  S.pendingPauseGameId = null;
+  S.historyMessage = "Το παιχνίδι αποθηκεύτηκε σε παύση.";
+  S.screen = "homeMenu";
+  render();
+}
+
+function confirmReplacePausedGame() {
+  if (S.pendingPauseGameId) {
+    gameHistoryStore.update(S.pendingPauseGameId, game => ({
+      ...game,
+      status: "superseded",
+      statusUpdatedAt: nowIso(),
+      supersededAt: nowIso()
+    }));
+  }
+
+  savePausedGame();
+}
+
+function cancelReplacePausedGame() {
+  S.pendingPauseGameId = null;
+  S.screen = S.pauseReturnScreen || "game";
+
+  render();
+  startTimer();
+}
+
+function resumeGame(id) {
+  const game = gameHistoryStore.find(id);
+
+  if (!game || !["active", "paused"].includes(game.status)) return;
+
+  stopTimer();
+
+  ACTIVE_DECK = DECKS[game.deckId] || ACTIVE_DECK;
+  S.currentGameId = game.id;
+  S.currentGameStartedAt = game.startedAt;
+  S.mode = game.mode;
+  S.matchType = game.matchType;
+  S.playerIdentities = cloneStateValue(game.players || []);
+  S.player1Name = escapeHtml(game.playerNames?.[0] || game.players?.[0]?.name || "Player 1");
+  S.player2Name = escapeHtml(game.playerNames?.[1] || game.players?.[1]?.name || "Player 2");
+
+  const snapshot = game.snapshot || {};
+
+  S.p = cloneStateValue(snapshot.p || []);
+  S.b = cloneStateValue(snapshot.b || []);
+  S.pending = cloneStateValue(snapshot.pending || []);
+  S.round = cloneStateValue(snapshot.round || null);
+  S.log = cloneStateValue(snapshot.log || []);
+  S.currentTurn = snapshot.currentTurn || "player1";
+  S.timeLeft = snapshot.timeLeft ?? null;
+  S.timeExpired = Boolean(snapshot.timeExpired);
+  S.screen = ["game", "result", "handoff"].includes(snapshot.screen)
+    ? snapshot.screen
+    : "game";
+  S.historyMessage = "";
+
+  gameHistoryStore.update(game.id, savedGame => ({
+    ...savedGame,
+    status: "active",
+    statusUpdatedAt: nowIso(),
+    resumedAt: nowIso(),
+    lastSavedAt: nowIso()
+  }));
+  syncGameHistory();
+  saveActiveGameSnapshot();
+
+  render();
+  startTimer();
 }
 
 function startHomeMatch(type) {
@@ -168,12 +957,167 @@ function toggleMatchSettings(type) {
   setMatchSettingsPanel("time", !S.timeSettingsOpen);
 }
 
-function startTimer() {
+function setGameMode(mode) {
+  S.mode = mode;
+
+  if (mode === "bot") {
+    S.player2Name = "Υπολογιστής";
+  }
+
+  render();
+}
+
+function setPlayerSetupMode(playerNumber, mode) {
+  S[`player${playerNumber}SetupMode`] = mode;
+
+  if (mode === "profile") {
+    ensurePlayerProfileSelection(playerNumber);
+  }
+
+  render();
+}
+
+function selectPlayerProfile(playerNumber, profileName) {
+  S[`player${playerNumber}ProfileName`] = profileName;
+  S[`player${playerNumber}SetupMode`] = "profile";
+  render();
+}
+
+function setGuestName(playerNumber, name) {
+  S[`player${playerNumber}GuestName`] = name;
+}
+
+function toggleCreateProfile(playerNumber) {
+  S[`player${playerNumber}SetupMode`] = "create";
+  S.profileMessage = "";
+  render();
+}
+
+function setNewProfileName(playerNumber, name) {
+  S[`player${playerNumber}NewProfileName`] = name;
+}
+
+function saveNewProfile(playerNumber) {
+  const newProfileKey = `player${playerNumber}NewProfileName`;
+  const result = profileStore.create(S[newProfileKey]);
+
+  if (!result.ok) {
+    S.profileMessage = result.message;
+    render();
+    return;
+  }
+
+  S.profiles = result.profiles;
+  S[`player${playerNumber}ProfileName`] = result.profileName;
+  S[`player${playerNumber}SetupMode`] = "profile";
+  S[newProfileKey] = "";
+  S.profileMessage = `Το προφίλ "${result.profileName}" δημιουργήθηκε.`;
+  render();
+}
+
+function setProfileManagerName(name) {
+  S.profileManagerName = name;
+}
+
+function createManagedProfile() {
+  const result = profileStore.create(S.profileManagerName);
+
+  if (!result.ok) {
+    S.profileMessage = result.message;
+    render();
+    return;
+  }
+
+  S.profiles = result.profiles;
+  S.profileManagerName = "";
+  S.profileMessage = `Το προφίλ "${result.profileName}" δημιουργήθηκε.`;
+  render();
+}
+
+function startEditProfile(profileName) {
+  profileName = readActionValue(profileName);
+  S.editingProfileName = profileName;
+  S.editingProfileValue = profileName;
+  S.profileMessage = "";
+  render();
+}
+
+function setEditingProfileValue(name) {
+  S.editingProfileValue = name;
+}
+
+function cancelEditProfile() {
+  S.editingProfileName = "";
+  S.editingProfileValue = "";
+  S.profileMessage = "";
+  render();
+}
+
+function saveProfileEdit() {
+  const currentName = S.editingProfileName;
+  const result = profileStore.rename(currentName, S.editingProfileValue);
+
+  if (!result.ok) {
+    S.profileMessage = result.message;
+    render();
+    return;
+  }
+
+  S.profiles = result.profiles;
+
+  if (S.player1ProfileName === currentName) S.player1ProfileName = result.profileName;
+  if (S.player2ProfileName === currentName) S.player2ProfileName = result.profileName;
+
+  gameHistoryStore.renameProfile(currentName, result.profileName);
+  syncGameHistory();
+
+  S.editingProfileName = "";
+  S.editingProfileValue = "";
+  S.profileMessage = `Το προφίλ μετονομάστηκε σε "${result.profileName}".`;
+  render();
+}
+
+function deleteManagedProfile(profileName) {
+  profileName = readActionValue(profileName);
+
+  if (!confirm(`Να διαγραφεί το προφίλ "${profileName}" και το σχετικό ιστορικό παιχνιδιών;`)) {
+    return;
+  }
+
+  const result = profileStore.delete(profileName);
+
+  if (!result.ok) {
+    S.profileMessage = result.message;
+    render();
+    return;
+  }
+
+  S.profiles = result.profiles;
+  S.gameHistory = gameHistoryStore.deleteByProfile(profileName);
+
+  if (S.player1ProfileName === profileName) S.player1ProfileName = S.profiles[0] || "";
+  if (S.player2ProfileName === profileName) S.player2ProfileName = S.profiles[0] || "";
+
+  if (S.profiles.length === 0) {
+    S.player1SetupMode = "guest";
+    S.player2SetupMode = "guest";
+  }
+
+  S.editingProfileName = "";
+  S.editingProfileValue = "";
+  S.profileMessage = `Το προφίλ "${profileName}" διαγράφηκε.`;
+  render();
+}
+
+function startTimer(reset = false) {
   stopTimer();
 
   if (S.matchType !== "time") return;
 
-  S.timeLeft = timeAttackSeconds();
+  if (reset || S.timeLeft === null) {
+    S.timeLeft = timeAttackSeconds();
+  }
+
   S.timeExpired = false;
 
   S.timerId = setInterval(() => {
@@ -228,15 +1172,18 @@ function startMatch(mode, type) {
 
   S.timeLeft = type === "time" ? timeAttackSeconds() : null;
   S.timeExpired = false;
+  S.historyMessage = "";
+
+  createActiveGameRecord();
 
   render();
-  startTimer();
+  startTimer(true);
 }
 
 function h() {
-  const showTimer = S.matchType === "time" && S.screen !== "home";
+  const showTimer = S.matchType === "time" && isGameScreen();
   const timerIsDanger = showTimer && S.timeLeft <= 30;
-  const title = S.screen === "home" ? "Υπερατού Game" : ACTIVE_DECK.title;
+  const title = screenTitle();
 
   return `
     <header class="mb-3">
@@ -244,7 +1191,7 @@ function h() {
 
         <div>
           ${
-            S.screen !== "home"
+            isGameScreen()
               ? `
                 <p class="text-[10px] font-black uppercase tracking-[.25em] text-amber-400">
                   Υπερατού
@@ -285,7 +1232,7 @@ function h() {
       </div>
 
       ${
-        S.screen !== "home"
+        isGameScreen()
           ? scoreBar()
           : ""
       }
@@ -461,11 +1408,498 @@ function changelogPanel() {
   `;
 }
 
-function home() {
+function matchControls() {
+  return `
+    <div class="grid gap-3">
+      ${
+        canPauseCurrentGame()
+          ? `
+            <button
+              onclick="pauseCurrentGame()"
+              class="w-full rounded-2xl bg-amber-500 px-4 py-3 text-sm font-black text-slate-950"
+            >
+              Pause Game
+            </button>
+          `
+          : ""
+      }
+
+      <button
+        onclick="exitMatch()"
+        class="w-full rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-sm font-bold text-slate-300"
+      >
+        Exit Match
+      </button>
+    </div>
+  `;
+}
+
+function rulesPanel() {
+  return `
+    <section class="mt-5 rounded-[2rem] border border-slate-800 bg-slate-900/60 p-5">
+      <h3 class="font-black">Κανόνες</h3>
+      <p class="mt-2 text-sm text-slate-400">
+        1. Διάλεξε χαρακτηριστικό όταν είναι η σειρά σου.<br>
+        2. Ο νικητής του γύρου παίζει στον επόμενο γύρο.<br>
+        3. Σε ισοπαλία οι κάρτες πάνε στο pending pile και ο επόμενος νικητής τα παίρνει όλα.
+      </p>
+    </section>
+  `;
+}
+
+function statusLabel(status) {
+  const labels = {
+    active: "Σε εξέλιξη",
+    paused: "Σε παύση",
+    completed: "Ολοκληρώθηκε",
+    abandoned: "Εγκαταλείφθηκε",
+    superseded: "Αντικαταστάθηκε"
+  };
+
+  return labels[status] || status;
+}
+
+function statusClass(status) {
+  const classes = {
+    active: "bg-sky-500 text-white",
+    paused: "bg-amber-500 text-slate-950",
+    completed: "bg-emerald-500 text-slate-950",
+    abandoned: "bg-slate-600 text-white",
+    superseded: "bg-purple-500 text-white"
+  };
+
+  return classes[status] || "bg-slate-600 text-white";
+}
+
+function playerIdentityText(identity) {
+  const typeLabels = {
+    profile: "profile",
+    guest: "guest",
+    bot: "bot"
+  };
+
+  return `${escapeHtml(identity.name)} (${typeLabels[identity.type] || identity.type})`;
+}
+
+function historyPlayerNames(games) {
+  return [...new Set(games
+    .flatMap(game => game.players || [])
+    .map(player => player.name)
+    .filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b, "el-GR"));
+}
+
+function optionHtml(value, label, selectedValue) {
+  return `
+    <option value="${escapeHtml(value)}" ${value === selectedValue ? "selected" : ""}>
+      ${escapeHtml(label)}
+    </option>
+  `;
+}
+
+function filteredGameHistory(games) {
+  return games.filter(game => {
+    const matchesPlayer = S.historyPlayerFilter === "all"
+      || (game.players || []).some(player => player.name === S.historyPlayerFilter);
+    const matchesStatus = S.historyStatusFilter === "all"
+      || game.status === S.historyStatusFilter;
+    const matchesDeck = S.historyDeckFilter === "all"
+      || game.deckId === S.historyDeckFilter;
+
+    return matchesPlayer && matchesStatus && matchesDeck;
+  });
+}
+
+function setHistoryFilter(filterName, value) {
+  S[filterName] = value;
+  render();
+}
+
+function clearHistoryFilters() {
+  S.historyPlayerFilter = "all";
+  S.historyStatusFilter = "all";
+  S.historyDeckFilter = "all";
+  render();
+}
+
+function gameHistory() {
+  const games = gameHistoryStore.list();
+  const filteredGames = filteredGameHistory(games);
+  const playerOptions = [
+    optionHtml("all", "Όλοι οι παίκτες", S.historyPlayerFilter),
+    ...historyPlayerNames(games).map(name => optionHtml(name, name, S.historyPlayerFilter))
+  ].join("");
+  const statusOptions = [
+    optionHtml("all", "Όλες οι καταστάσεις", S.historyStatusFilter),
+    ...["active", "paused", "completed", "abandoned", "superseded"]
+      .map(status => optionHtml(status, statusLabel(status), S.historyStatusFilter))
+  ].join("");
+  const deckOptions = [
+    optionHtml("all", "Όλα τα decks", S.historyDeckFilter),
+    ...Object.values(DECKS).map(deck => optionHtml(deck.id, deck.title, S.historyDeckFilter))
+  ].join("");
+
+  app.innerHTML = h() + `
+    ${backButton()}
+
+    <section class="rounded-[2rem] border border-slate-800 bg-slate-900/80 p-5">
+      <div class="mb-4 flex items-center justify-between gap-3">
+        <h2 class="text-xl font-black">Game History</h2>
+
+        <button
+          onclick="clearHistoryFilters()"
+          class="grid h-10 w-10 place-items-center rounded-2xl border border-slate-700 bg-slate-950 text-amber-400"
+          title="Clear filters"
+        >
+          ${iconRefresh("h-5 w-5")}
+        </button>
+      </div>
+
+      ${
+        S.historyMessage
+          ? `
+            <p class="mt-4 rounded-2xl border border-amber-500/40 bg-amber-500/10 p-3 text-sm font-bold text-amber-300">
+              ${escapeHtml(S.historyMessage)}
+            </p>
+          `
+          : ""
+      }
+
+      <div class="grid gap-3">
+        <select
+          onchange="setHistoryFilter('historyPlayerFilter', this.value)"
+          class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 font-bold text-white outline-none focus:border-amber-400"
+        >
+          ${playerOptions}
+        </select>
+
+        <select
+          onchange="setHistoryFilter('historyStatusFilter', this.value)"
+          class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 font-bold text-white outline-none focus:border-amber-400"
+        >
+          ${statusOptions}
+        </select>
+
+        <select
+          onchange="setHistoryFilter('historyDeckFilter', this.value)"
+          class="w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 font-bold text-white outline-none focus:border-amber-400"
+        >
+          ${deckOptions}
+        </select>
+      </div>
+
+      <div class="mt-4 grid gap-4">
+        ${
+          games.length === 0
+            ? `
+              <p class="rounded-2xl border border-slate-800 bg-slate-950/70 p-4 text-sm text-slate-400">
+                Δεν υπάρχει ιστορικό παιχνιδιών ακόμα.
+              </p>
+            `
+            : filteredGames.length === 0
+              ? `
+                <p class="rounded-2xl border border-slate-800 bg-slate-950/70 p-4 text-sm text-slate-400">
+                  Δεν βρέθηκαν παιχνίδια για τα επιλεγμένα φίλτρα.
+                </p>
+              `
+              : filteredGames.map(gameHistoryCard).join("")
+        }
+      </div>
+    </section>
+  `;
+}
+
+function gameHistoryCard(game) {
+  const score = game.snapshot?.score || {};
+  const players = game.players || [];
+  const canResume = game.status === "paused" || game.status === "active";
+
+  return `
+    <div class="rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
+      <div class="mb-3 flex items-start justify-between gap-3">
+        <div>
+          <p class="text-sm font-black text-amber-400">
+            ${escapeHtml(game.deckTitle || game.deckId)} · ${escapeHtml(game.matchType)}
+          </p>
+          <p class="mt-1 text-xs text-slate-400">
+            ${players.map(playerIdentityText).join(" vs ")}
+          </p>
+        </div>
+
+        <span class="rounded-full px-3 py-1 text-[10px] font-black ${statusClass(game.status)}">
+          ${statusLabel(game.status)}
+        </span>
+      </div>
+
+      <div class="grid grid-cols-3 gap-2 text-center text-xs">
+        <div class="rounded-xl bg-emerald-500/10 p-2 text-emerald-300">
+          <p>${escapeHtml(players[0]?.name || "P1")}</p>
+          <p class="text-lg font-black">${score.player1Cards ?? 0}</p>
+        </div>
+
+        <div class="rounded-xl bg-amber-500/10 p-2 text-amber-300">
+          <p>Pending</p>
+          <p class="text-lg font-black">${score.pendingCards ?? 0}</p>
+        </div>
+
+        <div class="rounded-xl bg-rose-500/10 p-2 text-rose-300">
+          <p>${escapeHtml(players[1]?.name || "P2")}</p>
+          <p class="text-lg font-black">${score.player2Cards ?? 0}</p>
+        </div>
+      </div>
+
+      <p class="mt-3 text-xs text-slate-500">
+        Έναρξη: ${formatDateTime(game.startedAt)}
+      </p>
+      <p class="mt-1 text-xs text-slate-500">
+        Τελευταία αποθήκευση: ${formatDateTime(game.lastSavedAt)}
+      </p>
+
+      ${
+        canResume
+          ? `
+            <button
+              onclick="resumeGame('${game.id}')"
+              class="mt-4 w-full rounded-2xl bg-amber-500 px-4 py-3 font-black text-slate-950"
+            >
+              Resume
+            </button>
+          `
+          : ""
+      }
+    </div>
+  `;
+}
+
+function pauseConfirm() {
+  const conflict = gameHistoryStore.find(S.pendingPauseGameId);
+
+  app.innerHTML = h() + `
+    <section class="rounded-[2rem] border border-slate-800 bg-slate-900 p-6 text-center">
+      <p class="text-xs uppercase tracking-[.35em] text-amber-400">
+        Pause Game
+      </p>
+
+      <h2 class="mt-3 text-3xl font-black">
+        Υπάρχει ήδη παιχνίδι σε παύση
+      </h2>
+
+      <p class="mt-3 text-sm text-slate-400">
+        Υπάρχει ήδη αποθηκευμένο παιχνίδι για αυτόν τον συνδυασμό παικτών και deck.
+        Θέλεις να το αντικαταστήσεις με το τρέχον παιχνίδι;
+      </p>
+
+      ${
+        conflict
+          ? `
+            <div class="mt-5 rounded-2xl border border-slate-700 bg-slate-950 p-4 text-left text-sm text-slate-300">
+              <p class="font-black text-amber-400">${escapeHtml(conflict.deckTitle || conflict.deckId)}</p>
+              <p class="mt-1">${(conflict.players || []).map(playerIdentityText).join(" vs ")}</p>
+              <p class="mt-1 text-xs text-slate-500">Παύση: ${formatDateTime(conflict.pausedAt || conflict.lastSavedAt)}</p>
+            </div>
+          `
+          : ""
+      }
+
+      <button
+        onclick="confirmReplacePausedGame()"
+        class="mt-6 w-full rounded-2xl bg-amber-500 px-4 py-4 font-black text-slate-950"
+      >
+        Ναι, αντικατάσταση
+      </button>
+
+      <button
+        onclick="cancelReplacePausedGame()"
+        class="mt-3 w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-4 font-black"
+      >
+        Όχι, συνέχεια παιχνιδιού
+      </button>
+    </section>
+  `;
+}
+
+function profiles() {
+  app.innerHTML = h() + `
+    ${backButton()}
+
+    <section class="rounded-[2rem] border border-slate-800 bg-slate-900/80 p-5">
+      <h2 class="mb-4 text-xl font-black">Προφίλ παικτών</h2>
+
+      <div class="rounded-2xl border border-slate-700 bg-slate-950 p-4">
+        <label class="mb-2 block text-sm font-bold text-slate-300">
+          Νέο προφίλ
+        </label>
+
+        <input
+          value="${escapeHtml(S.profileManagerName)}"
+          oninput="setProfileManagerName(this.value)"
+          class="mb-3 w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 outline-none focus:border-amber-400"
+        />
+
+        <button
+          onclick="createManagedProfile()"
+          class="w-full rounded-2xl bg-amber-500 px-4 py-3 font-black text-slate-950"
+        >
+          Δημιουργία προφίλ
+        </button>
+      </div>
+
+      ${
+        S.profileMessage
+          ? `
+            <p class="mt-4 rounded-2xl border border-amber-500/40 bg-amber-500/10 p-3 text-sm font-bold text-amber-300">
+              ${escapeHtml(S.profileMessage)}
+            </p>
+          `
+          : ""
+      }
+
+      <div class="mt-4 grid gap-3">
+        ${
+          S.profiles.length === 0
+            ? `
+              <p class="rounded-2xl border border-slate-800 bg-slate-950/70 p-4 text-sm text-slate-400">
+                Δεν υπάρχουν αποθηκευμένα προφίλ.
+              </p>
+            `
+            : S.profiles.map(profileName => `
+              <div class="rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
+                ${
+                  S.editingProfileName === profileName
+                    ? `
+                      <input
+                        value="${escapeHtml(S.editingProfileValue)}"
+                        oninput="setEditingProfileValue(this.value)"
+                        class="mb-3 w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 outline-none focus:border-amber-400"
+                      />
+
+                      <div class="grid grid-cols-2 gap-3">
+                        <button
+                          onclick="saveProfileEdit()"
+                          class="rounded-2xl bg-amber-500 px-4 py-3 font-black text-slate-950"
+                        >
+                          Save
+                        </button>
+
+                        <button
+                          onclick="cancelEditProfile()"
+                          class="rounded-2xl border border-slate-700 bg-slate-800 px-4 py-3 font-black"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    `
+                    : `
+                      <div class="flex items-center justify-between gap-3">
+                        <p class="font-black text-amber-400">${escapeHtml(profileName)}</p>
+
+                        <div class="flex gap-2">
+                          <button
+                            onclick="startEditProfile('${actionValue(profileName)}')"
+                            class="rounded-xl border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-black"
+                          >
+                            Edit
+                          </button>
+
+                          <button
+                            onclick="deleteManagedProfile('${actionValue(profileName)}')"
+                            class="rounded-xl border border-rose-500/50 bg-rose-500/10 px-3 py-2 text-xs font-black text-rose-300"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                    `
+                }
+              </div>
+            `).join("")
+        }
+      </div>
+    </section>
+  `;
+}
+
+function versionChanges() {
+  app.innerHTML = h() + `
+    ${backButton()}
+
+    <section class="rounded-[2rem] border border-slate-800 bg-slate-900/80 p-5">
+      <h2 class="mb-4 text-xl font-black">Version Changes</h2>
+
+      <div class="grid gap-4">
+        ${APP_CHANGELOG.map(item => `
+          <div class="rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
+            <p class="mb-2 text-sm font-black text-amber-400">
+              v${item.version}
+            </p>
+
+            <ul class="list-disc space-y-1 pl-5 text-sm text-slate-400">
+              ${item.changes.map(change => `
+                <li>${change}</li>
+              `).join("")}
+            </ul>
+          </div>
+        `).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function homeMenu() {
+  app.innerHTML = h() + `
+    <section class="rounded-[2rem] border border-slate-800 bg-slate-900/80 p-5">
+      <div class="grid grid-cols-2 gap-3">
+        <button
+          onclick="navigate('newGame')"
+          class="flex aspect-square flex-col items-center justify-center gap-4 rounded-2xl bg-amber-500 p-4 text-center font-black text-slate-950"
+        >
+          <span class="grid h-16 w-16 place-items-center rounded-2xl bg-slate-950/10">
+            ${iconCards("h-10 w-10")}
+          </span>
+          <span class="text-sm leading-tight">Νέο παιχνίδι</span>
+        </button>
+
+        <button
+          onclick="navigate('gameHistory')"
+          class="flex aspect-square flex-col items-center justify-center gap-4 rounded-2xl border border-slate-700 bg-slate-800 p-4 text-center font-black"
+        >
+          <span class="grid h-16 w-16 place-items-center rounded-2xl border border-amber-500/40 bg-slate-950 text-amber-400">
+            ${iconList("h-10 w-10")}
+          </span>
+          <span class="text-sm leading-tight">Ιστορικό παιχνιδιών</span>
+        </button>
+
+        <button
+          onclick="navigate('profiles')"
+          class="flex aspect-square flex-col items-center justify-center gap-4 rounded-2xl border border-slate-700 bg-slate-800 p-4 text-center font-black"
+        >
+          <span class="grid h-16 w-16 place-items-center rounded-2xl border border-amber-500/40 bg-slate-950 text-amber-400">
+            ${iconUsers("h-10 w-10")}
+          </span>
+          <span class="text-sm leading-tight">Διαχείριση προφίλ</span>
+        </button>
+
+        <button
+          onclick="navigate('versionChanges')"
+          class="flex aspect-square flex-col items-center justify-center gap-4 rounded-2xl border border-slate-700 bg-slate-800 p-4 text-center font-black"
+        >
+          <span class="grid h-16 w-16 place-items-center rounded-2xl border border-amber-500/40 bg-slate-950 text-amber-400">
+            ${iconRefresh("h-10 w-10")}
+          </span>
+          <span class="text-sm leading-tight">Version Changes</span>
+        </button>
+      </div>
+    </section>
+  `;
+}
+
+function newGame() {
   const quickCards = quickCardsPerPlayer();
   const timeMinutes = timeAttackMinutes();
 
   app.innerHTML = h() + `
+    ${backButton()}
+
     <section class="rounded-[2rem] border border-slate-800 bg-slate-900/80 p-5">
       <h2 class="mb-4 text-xl font-black">Επιλογές</h2>
 
@@ -491,7 +1925,7 @@ function home() {
 
         <div class="grid grid-cols-2 gap-3">
           <button
-            onclick="S.mode='bot'; S.player2Name='Υπολογιστής'; render()"
+            onclick="setGameMode('bot')"
             class="rounded-2xl px-4 py-3 font-black ${
               S.mode === "bot"
                 ? "bg-amber-500 text-slate-950"
@@ -502,7 +1936,7 @@ function home() {
           </button>
 
           <button
-            onclick="S.mode='human'; if(S.player2Name==='Υπολογιστής') S.player2Name='Παίκτης 2'; render()"
+            onclick="setGameMode('human')"
             class="rounded-2xl px-4 py-3 font-black ${
               S.mode === "human"
                 ? "bg-amber-500 text-slate-950"
@@ -514,29 +1948,11 @@ function home() {
         </div>
       </div>
 
-      <label class="mb-2 block text-sm font-bold text-slate-300">
-        Όνομα παίκτη 1
-      </label>
-
-      <input
-        id="p1Name"
-        value="${S.player1Name}"
-        class="mb-4 w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 outline-none focus:border-amber-400"
-      />
+      ${playerSetupPanel(1)}
 
       ${
         S.mode === "human"
-          ? `
-            <label class="mb-2 block text-sm font-bold text-slate-300">
-              Όνομα παίκτη 2
-            </label>
-
-            <input
-              id="p2Name"
-              value="${S.player2Name}"
-              class="mb-4 w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 outline-none focus:border-amber-400"
-            />
-          `
+          ? playerSetupPanel(2)
           : ""
       }
 
@@ -648,16 +2064,7 @@ function home() {
       </div>
     </section>
 
-    <section class="mt-5 rounded-[2rem] border border-slate-800 bg-slate-900/60 p-5">
-      <h3 class="font-black">Κανόνες</h3>
-      <p class="mt-2 text-sm text-slate-400">
-        1. Διάλεξε χαρακτηριστικό όταν είναι η σειρά σου.<br>
-        2. Ο νικητής του γύρου παίζει στον επόμενο γύρο.<br>
-        3. Σε ισοπαλία οι κάρτες πάνε στο pending pile και ο επόμενος νικητής τα παίρνει όλα.
-      </p>
-    </section>
-
-    ${changelogPanel()}
+    ${rulesPanel()}
   `;
 }
 
@@ -681,12 +2088,7 @@ function game() {
         </button>
       </div>
 
-      <button
-        onclick="S.screen='home';render()"
-        class="w-full rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-sm font-bold text-slate-300"
-      >
-        Exit Match
-      </button>
+      ${matchControls()}
     `;
     return;
   }
@@ -715,12 +2117,9 @@ function game() {
 
     ${card(activeDeck[0], true)}
 
-    <button
-      onclick="S.screen='home';render()"
-      class="mt-4 w-full rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-sm font-bold text-slate-300"
-    >
-      Exit Match
-    </button>
+    <div class="mt-4">
+      ${matchControls()}
+    </div>
   `;
 }
 
@@ -753,6 +2152,7 @@ function resolveRound(k, selectedBy) {
   S.round = { a, pc, bc, w, selectedBy };
   S.screen = "result";
 
+  saveActiveGameSnapshot();
   render();
 }
 
@@ -798,6 +2198,7 @@ function cont() {
     S.screen = "game";
   }
 
+  saveActiveGameSnapshot();
   render();
 }
 
@@ -886,6 +2287,7 @@ function handoff() {
 
 function over() {
   stopTimer();
+  completeCurrentGame();
 
   const p1Cards = S.p.length;
   const p2Cards = S.b.length;
@@ -936,7 +2338,7 @@ function over() {
         Παίξε ξανά
       </button>
 
-      <button onclick="stopTimer(); S.screen='home'; render()" class="mt-3 w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-4 font-black">
+      <button onclick="returnToHomeMenu()" class="mt-3 w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-4 font-black">
         Αρχική σελίδα
       </button>
     </section>
@@ -944,10 +2346,15 @@ function over() {
 }
 
 function render() {
-  if (S.screen === "home") home();
+  if (S.screen === "homeMenu") homeMenu();
+  if (S.screen === "newGame") newGame();
+  if (S.screen === "gameHistory") gameHistory();
+  if (S.screen === "profiles") profiles();
+  if (S.screen === "versionChanges") versionChanges();
   if (S.screen === "game") game();
   if (S.screen === "result") result();
   if (S.screen === "handoff") handoff();
+  if (S.screen === "pauseConfirm") pauseConfirm();
   if (S.screen === "over") over();
 }
 
@@ -960,11 +2367,34 @@ function selectDeck(deckId) {
 window.S = S;
 window.DECKS = DECKS;
 
+window.navigate = navigate;
 window.render = render;
 window.start = start;
 window.startMatch = startMatch;
 window.startHomeMatch = startHomeMatch;
 window.toggleMatchSettings = toggleMatchSettings;
+window.resumeGame = resumeGame;
+window.setHistoryFilter = setHistoryFilter;
+window.clearHistoryFilters = clearHistoryFilters;
+window.pauseCurrentGame = pauseCurrentGame;
+window.confirmReplacePausedGame = confirmReplacePausedGame;
+window.cancelReplacePausedGame = cancelReplacePausedGame;
+window.exitMatch = exitMatch;
+window.returnToHomeMenu = returnToHomeMenu;
+window.setGameMode = setGameMode;
+window.setPlayerSetupMode = setPlayerSetupMode;
+window.selectPlayerProfile = selectPlayerProfile;
+window.setGuestName = setGuestName;
+window.toggleCreateProfile = toggleCreateProfile;
+window.setNewProfileName = setNewProfileName;
+window.saveNewProfile = saveNewProfile;
+window.setProfileManagerName = setProfileManagerName;
+window.createManagedProfile = createManagedProfile;
+window.startEditProfile = startEditProfile;
+window.setEditingProfileValue = setEditingProfileValue;
+window.cancelEditProfile = cancelEditProfile;
+window.saveProfileEdit = saveProfileEdit;
+window.deleteManagedProfile = deleteManagedProfile;
 window.clampQuickCardsInput = clampQuickCardsInput;
 window.clampTimeAttackInput = clampTimeAttackInput;
 window.pick = pick;
