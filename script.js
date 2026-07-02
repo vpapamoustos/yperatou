@@ -1,13 +1,33 @@
 import { APP_VERSION, APP_CHANGELOG } from "./src/changelog.js";
 import { getDeck, getDeckAttrs, getDefaultDeck, listDecks } from "./src/domain/decks.js";
 import {
+  GAME_STATUSES,
+  activeGameRecord,
+  activeGameSnapshotUpdate,
+  canResumeGame,
+  findConflictingPausedGame,
+  gameStatusUpdate,
+  gameUniquenessKey as buildGameUniquenessKey,
+  statusClass,
+  statusLabel
+} from "./src/domain/game-history.js";
+import {
+  TIME_ATTACK_MAX_MINUTES,
+  TIME_ATTACK_MIN_MINUTES,
+  QUICK_MATCH_MIN_CARDS,
+  clampInt,
+  maxQuickCardsPerPlayer as getMaxQuickCardsPerPlayer,
+  quickCardsPerPlayer as getQuickCardsPerPlayer,
+  timeAttackMinutes as getTimeAttackMinutes,
+  timeAttackSeconds as getTimeAttackSeconds
+} from "./src/domain/match-settings.js";
+import {
   botIdentity,
   canPauseIdentities,
   findProfileById,
   firstProfileId,
   playerDisplayName as getPlayerDisplayName,
   playerIdentity as getPlayerIdentity,
-  playerPairKey,
   profileDisplayLabel
 } from "./src/domain/players.js";
 import { S } from "./src/state.js";
@@ -170,27 +190,20 @@ function formatTime(seconds) {
   return `${mins}:${String(secs).padStart(2, "0")}`;
 }
 
-function clampInt(value, min, max, fallback) {
-  const parsed = Number.parseInt(value, 10);
-  const safeValue = Number.isFinite(parsed) ? parsed : fallback;
-
-  return Math.min(max, Math.max(min, safeValue));
-}
-
 function maxQuickCardsPerPlayer() {
-  return Math.min(15, Math.floor(ACTIVE_DECK.cards.length / 2));
+  return getMaxQuickCardsPerPlayer(ACTIVE_DECK);
 }
 
 function quickCardsPerPlayer() {
-  return clampInt(S.quickCardsPerPlayer, 1, maxQuickCardsPerPlayer(), 7);
+  return getQuickCardsPerPlayer(S.quickCardsPerPlayer, ACTIVE_DECK);
 }
 
 function timeAttackMinutes() {
-  return clampInt(S.timeAttackMinutes, 1, 20, 3);
+  return getTimeAttackMinutes(S.timeAttackMinutes);
 }
 
 function timeAttackSeconds() {
-  return timeAttackMinutes() * 60;
+  return getTimeAttackSeconds(S.timeAttackMinutes);
 }
 
 function clampNumberInput(input, min, max, fallback, allowEmpty = false) {
@@ -213,21 +226,26 @@ function applyHomeSettings() {
   if (quickInput) {
     S.quickCardsPerPlayer = clampNumberInput(
       quickInput,
-      1,
+      QUICK_MATCH_MIN_CARDS,
       maxQuickCardsPerPlayer(),
       S.quickCardsPerPlayer
     );
   }
 
   if (timeInput) {
-    S.timeAttackMinutes = clampNumberInput(timeInput, 1, 20, S.timeAttackMinutes);
+    S.timeAttackMinutes = clampNumberInput(
+      timeInput,
+      TIME_ATTACK_MIN_MINUTES,
+      TIME_ATTACK_MAX_MINUTES,
+      S.timeAttackMinutes
+    );
   }
 }
 
 function clampQuickCardsInput(input, allowEmpty = false) {
   S.quickCardsPerPlayer = clampNumberInput(
     input,
-    1,
+    QUICK_MATCH_MIN_CARDS,
     maxQuickCardsPerPlayer(),
     quickCardsPerPlayer(),
     allowEmpty
@@ -235,7 +253,13 @@ function clampQuickCardsInput(input, allowEmpty = false) {
 }
 
 function clampTimeAttackInput(input, allowEmpty = false) {
-  S.timeAttackMinutes = clampNumberInput(input, 1, 20, timeAttackMinutes(), allowEmpty);
+  S.timeAttackMinutes = clampNumberInput(
+    input,
+    TIME_ATTACK_MIN_MINUTES,
+    TIME_ATTACK_MAX_MINUTES,
+    timeAttackMinutes(),
+    allowEmpty
+  );
 }
 
 function profileOptions(selectedId) {
@@ -447,50 +471,7 @@ function applyPlayerNames() {
 }
 
 function gameUniquenessKey(identities = S.playerIdentities) {
-  return `${ACTIVE_DECK.id}::${playerPairKey(identities)}`;
-}
-
-function scoreSnapshot() {
-  return {
-    player1Cards: S.p.length,
-    player2Cards: S.b.length,
-    pendingCards: S.pending.length
-  };
-}
-
-function matchSnapshot() {
-  return {
-    p: cloneStateValue(S.p),
-    b: cloneStateValue(S.b),
-    pending: cloneStateValue(S.pending),
-    round: cloneStateValue(S.round),
-    log: cloneStateValue(S.log),
-    currentTurn: S.currentTurn,
-    screen: S.screen,
-    timeLeft: S.timeLeft,
-    timeExpired: S.timeExpired,
-    score: scoreSnapshot()
-  };
-}
-
-function currentGameBase(status) {
-  const now = nowIso();
-
-  return {
-    id: S.currentGameId,
-    status,
-    statusUpdatedAt: now,
-    startedAt: S.currentGameStartedAt,
-    lastSavedAt: now,
-    deckId: ACTIVE_DECK.id,
-    deckTitle: ACTIVE_DECK.title,
-    mode: S.mode,
-    matchType: S.matchType,
-    uniquenessKey: gameUniquenessKey(),
-    players: cloneStateValue(S.playerIdentities),
-    playerNames: [S.player1Name, S.player2Name],
-    snapshot: matchSnapshot()
-  };
+  return buildGameUniquenessKey(ACTIVE_DECK.id, identities);
 }
 
 function syncGameHistory() {
@@ -503,11 +484,12 @@ function createActiveGameRecord() {
   S.currentGameId = gameId();
   S.currentGameStartedAt = startedAt;
 
-  gameHistoryStore.upsert({
-    ...currentGameBase("active"),
+  gameHistoryStore.upsert(activeGameRecord({
+    state: S,
+    deck: ACTIVE_DECK,
     startedAt,
-    createdAt: startedAt
-  });
+    cloneStateValue
+  }));
 
   syncGameHistory();
 }
@@ -515,10 +497,12 @@ function createActiveGameRecord() {
 function saveActiveGameSnapshot() {
   if (!S.currentGameId) return;
 
-  gameHistoryStore.update(S.currentGameId, game => ({
-    ...game,
-    ...currentGameBase("active"),
-    createdAt: game.createdAt || game.startedAt || S.currentGameStartedAt
+  gameHistoryStore.update(S.currentGameId, game => activeGameSnapshotUpdate({
+    game,
+    state: S,
+    deck: ACTIVE_DECK,
+    now: nowIso(),
+    cloneStateValue
   }));
 
   syncGameHistory();
@@ -529,14 +513,14 @@ function updateCurrentGameStatus(status, extra = {}) {
 
   const statusTime = nowIso();
 
-  gameHistoryStore.update(S.currentGameId, game => ({
-    ...game,
-    ...currentGameBase(status),
-    ...extra,
-    createdAt: game.createdAt || game.startedAt || S.currentGameStartedAt,
+  gameHistoryStore.update(S.currentGameId, game => gameStatusUpdate({
+    game,
+    state: S,
+    deck: ACTIVE_DECK,
     status,
-    statusUpdatedAt: statusTime,
-    lastSavedAt: statusTime
+    extra,
+    now: statusTime,
+    cloneStateValue
   }));
 
   syncGameHistory();
@@ -549,15 +533,11 @@ function canPauseCurrentGame() {
 }
 
 function conflictingPausedGame() {
-  const key = gameUniquenessKey();
-
-  return gameHistoryStore
-    .list()
-    .find(game => (
-      game.id !== S.currentGameId
-      && game.status === "paused"
-      && game.uniquenessKey === key
-    ));
+  return findConflictingPausedGame(
+    gameHistoryStore.list(),
+    S.currentGameId,
+    gameUniquenessKey()
+  );
 }
 
 function exitMatch() {
@@ -1235,30 +1215,6 @@ function rulesPanel() {
   `;
 }
 
-function statusLabel(status) {
-  const labels = {
-    active: "Σε εξέλιξη",
-    paused: "Σε παύση",
-    completed: "Ολοκληρώθηκε",
-    abandoned: "Εγκαταλείφθηκε",
-    superseded: "Αντικαταστάθηκε"
-  };
-
-  return labels[status] || status;
-}
-
-function statusClass(status) {
-  const classes = {
-    active: "bg-sky-500 text-white",
-    paused: "bg-amber-500 text-slate-950",
-    completed: "bg-emerald-500 text-slate-950",
-    abandoned: "bg-slate-600 text-white",
-    superseded: "bg-purple-500 text-white"
-  };
-
-  return classes[status] || "bg-slate-600 text-white";
-}
-
 function playerIdentityText(identity) {
   const typeLabels = {
     profile: "profile",
@@ -1319,7 +1275,7 @@ function gameHistory() {
   ].join("");
   const statusOptions = [
     optionHtml("all", "Όλες οι καταστάσεις", S.historyStatusFilter),
-    ...["active", "paused", "completed", "abandoned", "superseded"]
+    ...GAME_STATUSES
       .map(status => optionHtml(status, statusLabel(status), S.historyStatusFilter))
   ].join("");
   const deckOptions = [
@@ -1400,7 +1356,7 @@ function gameHistory() {
 function gameHistoryCard(game) {
   const score = game.snapshot?.score || {};
   const players = game.players || [];
-  const canResume = game.status === "paused" || game.status === "active";
+  const canResume = canResumeGame(game);
 
   return `
     <div class="rounded-2xl border border-slate-800 bg-slate-950/70 p-4">

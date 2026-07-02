@@ -1,6 +1,15 @@
-export const APP_VERSION = "0.8a6";
+export const APP_VERSION = "0.8a7";
 export const APP_CHANGELOG = [
 {
+  version: "0.8a7",
+  changes: [
+    "Extracted game history record builders, snapshots and status update helpers into a dedicated game history domain module.",
+    "Moved paused-game conflict detection, resume eligibility and game status display helpers out of the main script.",
+    "Extracted Quick Match and Time Attack limit calculations into a dedicated match settings domain module.",
+    "Centralized match setting constants for quick match card limits and time attack duration limits.",
+    "Reduced main script game-history and match-settings responsibilities in preparation for the next game engine refactor."
+  ]
+},{
   version: "0.8a6",
   changes: [
     "Added unique IDs to local player profiles while keeping existing localStorage profiles migratable.",
