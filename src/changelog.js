@@ -1,6 +1,15 @@
-export const APP_VERSION = "0.8a4";
+export const APP_VERSION = "0.8a5";
 export const APP_CHANGELOG = [
 {
+  version: "0.8a5",
+  changes: [
+    "Moved playable deck assembly into the src/data/decks index module.",
+    "Changed src/data.js into a lightweight deck export aggregator.",
+    "Added a deck list export so deck ordering is owned by the data layer.",
+    "Kept the existing game engine compatible with the new deck module structure through a playable deck adapter.",
+    "Added smooth scroll-to-top when a round result is shown, so the header, score and result are immediately visible."
+  ]
+},{
   version: "0.8a4",
   changes: [
     "Extracted profile storage into a dedicated local profile store module.",

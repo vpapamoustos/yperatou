@@ -13,6 +13,15 @@ function attrs() {
 }
 const app = document.getElementById("app");
 
+function scrollToGameTop() {
+  requestAnimationFrame(() => {
+    window.scrollTo({
+      top: 0,
+      behavior: "smooth"
+    });
+  });
+}
+
 function gameId() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
 
@@ -1883,6 +1892,7 @@ function resolveRound(k, selectedBy) {
 
   saveActiveGameSnapshot();
   render();
+  scrollToGameTop();
 }
 
 function cont() {

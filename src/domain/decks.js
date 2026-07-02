@@ -1,11 +1,11 @@
-import { DECKS } from "../data.js";
+import { DECK_LIST, DECKS } from "../data.js";
 
 export function getDeck(deckId, fallbackDeckId = "europe") {
   return DECKS[deckId] || DECKS[fallbackDeckId];
 }
 
 export function listDecks() {
-  return Object.values(DECKS);
+  return DECK_LIST;
 }
 
 export function getDeckAttrs(deck) {
