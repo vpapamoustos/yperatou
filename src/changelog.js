@@ -1,6 +1,17 @@
-export const APP_VERSION = "0.8a5";
+export const APP_VERSION = "0.8a6";
 export const APP_CHANGELOG = [
 {
+  version: "0.8a6",
+  changes: [
+    "Added unique IDs to local player profiles while keeping existing localStorage profiles migratable.",
+    "Added optional profile email fields for future online account support.",
+    "Allowed multiple profiles to share the same display name by using profile IDs for identity checks.",
+    "Extracted player identity helpers into a dedicated player domain module.",
+    "Updated game history profile references to support profile IDs and safely migrate older name-based records.",
+    "Cleared profile feedback messages when leaving profile-related screens so old edit messages do not remain visible.",
+    "Updated the Apple touch icon asset."
+  ]
+},{
   version: "0.8a5",
   changes: [
     "Moved playable deck assembly into the src/data/decks index module.",

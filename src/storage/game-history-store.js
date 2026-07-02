@@ -1,14 +1,6 @@
-import { normalizeProfileName } from "./profile-store.js";
+import { playerPairKey } from "../domain/players.js";
 
 const GAME_HISTORY_STORAGE_KEY = "yperatou.gameHistory.v1";
-
-function playerPairKey(identities = []) {
-  const pair = identities.map(identity => (
-    `${identity.type}:${normalizeProfileName(identity.profileName || identity.name).toLocaleLowerCase("el-GR")}`
-  ));
-
-  return pair.sort().join("|");
-}
 
 export function gameRecordUniquenessKey(game, identities = game.players || []) {
   return `${game.deckId}::${playerPairKey(identities)}`;
@@ -67,11 +59,47 @@ export const gameHistoryStore = {
     return this.list().find(game => game.id === id) || null;
   },
 
-  renameProfile(currentName, nextName) {
+  attachProfileIds(profiles = []) {
+    const games = this.list().map(game => {
+      const players = (game.players || []).map(player => {
+        if (player.type !== "profile" || player.profileId) return player;
+
+        const matches = profiles.filter(profile => profile.name === player.name);
+
+        if (matches.length !== 1) return player;
+
+        return {
+          ...player,
+          id: matches[0].id,
+          profileId: matches[0].id,
+          email: matches[0].email || ""
+        };
+      });
+
+      return {
+        ...game,
+        players,
+        uniquenessKey: gameRecordUniquenessKey(game, players)
+      };
+    });
+
+    this.save(games);
+    return games;
+  },
+
+  updateProfile(profileId, updates = {}) {
     const games = this.list().map(game => {
       const players = (game.players || []).map(player => (
-        player.type === "profile" && player.name === currentName
-          ? { ...player, name: nextName, profileName: nextName }
+        player.type === "profile"
+          && (player.profileId === profileId || (!player.profileId && player.name === updates.currentName))
+          ? {
+              ...player,
+              id: profileId,
+              profileId,
+              name: updates.name,
+              profileName: updates.name,
+              email: updates.email || ""
+            }
           : player
       ));
 
@@ -79,7 +107,7 @@ export const gameHistoryStore = {
         ...game,
         players,
         playerNames: (game.playerNames || []).map(name => (
-          name === currentName ? nextName : name
+          name === updates.currentName ? updates.name : name
         )),
         uniquenessKey: gameRecordUniquenessKey(game, players)
       };
@@ -89,9 +117,10 @@ export const gameHistoryStore = {
     return games;
   },
 
-  deleteByProfile(name) {
+  deleteByProfile(profileId, fallbackName = "") {
     const games = this.list().filter(game => !(game.players || []).some(player => (
-      player.type === "profile" && player.name === name
+      player.type === "profile"
+      && (player.profileId === profileId || (!player.profileId && player.name === fallbackName))
     )));
 
     this.save(games);

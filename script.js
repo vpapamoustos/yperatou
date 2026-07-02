@@ -1,8 +1,18 @@
 import { APP_VERSION, APP_CHANGELOG } from "./src/changelog.js";
 import { getDeck, getDeckAttrs, getDefaultDeck, listDecks } from "./src/domain/decks.js";
+import {
+  botIdentity,
+  canPauseIdentities,
+  findProfileById,
+  firstProfileId,
+  playerDisplayName as getPlayerDisplayName,
+  playerIdentity as getPlayerIdentity,
+  playerPairKey,
+  profileDisplayLabel
+} from "./src/domain/players.js";
 import { S } from "./src/state.js";
 import { gameHistoryStore } from "./src/storage/game-history-store.js";
-import { normalizeProfileName, profileStore } from "./src/storage/profile-store.js";
+import { profileStore } from "./src/storage/profile-store.js";
 import { actionValue, escapeHtml, formatDateTime, readActionValue } from "./src/ui/html.js";
 import { iconCards, iconList, iconRefresh, iconUsers } from "./src/ui/icons.js";
 
@@ -48,7 +58,22 @@ function screenTitle() {
   return isGameScreen() ? ACTIVE_DECK.title : titles[S.screen] || "Υπερατού Game";
 }
 
+function clearProfileFeedback() {
+  S.profileMessage = "";
+  S.editingProfileId = "";
+  S.editingProfileName = "";
+  S.editingProfileValue = "";
+  S.editingProfileEmail = "";
+}
+
 function navigate(screen) {
+  const leavingProfileContext = ["profiles", "newGame"].includes(S.screen)
+    && !["profiles", "newGame"].includes(screen);
+
+  if (screen === "homeMenu" || leavingProfileContext) {
+    clearProfileFeedback();
+  }
+
   S.screen = screen;
   render();
 }
@@ -72,8 +97,8 @@ function loadProfiles() {
   S.profiles = profileStore.list();
 
   if (S.profiles.length > 0) {
-    if (!S.player1ProfileName) S.player1ProfileName = S.profiles[0];
-    if (!S.player2ProfileName) S.player2ProfileName = S.profiles[0];
+    if (!findProfileById(S.profiles, S.player1ProfileId)) S.player1ProfileId = firstProfileId(S.profiles);
+    if (!findProfileById(S.profiles, S.player2ProfileId)) S.player2ProfileId = firstProfileId(S.profiles);
     if (S.player1SetupMode === "guest" && S.player1GuestName === "Παίκτης 1") {
       S.player1SetupMode = "profile";
     }
@@ -86,7 +111,7 @@ function loadProfiles() {
 loadProfiles();
 
 function loadGameHistory() {
-  S.gameHistory = gameHistoryStore.list();
+  S.gameHistory = gameHistoryStore.attachProfileIds(S.profiles);
 }
 
 loadGameHistory();
@@ -213,20 +238,20 @@ function clampTimeAttackInput(input, allowEmpty = false) {
   S.timeAttackMinutes = clampNumberInput(input, 1, 20, timeAttackMinutes(), allowEmpty);
 }
 
-function profileOptions(selectedName) {
+function profileOptions(selectedId) {
   if (S.profiles.length === 0) {
     return `<option value="">Δεν υπάρχουν αποθηκευμένα προφίλ</option>`;
   }
 
-  return S.profiles.map(profileName => `
-    <option value="${escapeHtml(profileName)}" ${profileName === selectedName ? "selected" : ""}>
-      ${escapeHtml(profileName)}
+  return S.profiles.map(profile => `
+    <option value="${escapeHtml(profile.id)}" ${profile.id === selectedId ? "selected" : ""}>
+      ${escapeHtml(profileDisplayLabel(profile))}
     </option>
   `).join("");
 }
 
 function ensurePlayerProfileSelection(playerNumber) {
-  const profileKey = `player${playerNumber}ProfileName`;
+  const profileKey = `player${playerNumber}ProfileId`;
   const modeKey = `player${playerNumber}SetupMode`;
 
   if (S.profiles.length === 0 && S[modeKey] !== "create") {
@@ -235,49 +260,41 @@ function ensurePlayerProfileSelection(playerNumber) {
     return;
   }
 
-  if (!S.profiles.includes(S[profileKey])) {
-    S[profileKey] = S.profiles[0];
+  if (!findProfileById(S.profiles, S[profileKey])) {
+    S[profileKey] = firstProfileId(S.profiles);
   }
 }
 
 function playerDisplayName(playerNumber) {
   const modeKey = `player${playerNumber}SetupMode`;
-  const profileKey = `player${playerNumber}ProfileName`;
+  const profileKey = `player${playerNumber}ProfileId`;
   const guestKey = `player${playerNumber}GuestName`;
-  const fallback = `Player ${playerNumber}`;
 
-  if (S[modeKey] === "profile" && S.profiles.includes(S[profileKey])) {
-    return S[profileKey];
-  }
-
-  return normalizeProfileName(S[guestKey]) || fallback;
+  return getPlayerDisplayName(
+    playerNumber,
+    {
+      mode: S[modeKey],
+      profileId: S[profileKey],
+      guestName: S[guestKey]
+    },
+    S.profiles
+  );
 }
 
 function playerIdentity(playerNumber) {
   const modeKey = `player${playerNumber}SetupMode`;
-  const profileKey = `player${playerNumber}ProfileName`;
+  const profileKey = `player${playerNumber}ProfileId`;
   const guestKey = `player${playerNumber}GuestName`;
-  const name = playerDisplayName(playerNumber);
 
-  if (S[modeKey] === "profile" && S.profiles.includes(S[profileKey])) {
-    return {
-      type: "profile",
-      name,
-      profileName: name
-    };
-  }
-
-  return {
-    type: "guest",
-    name
-  };
-}
-
-function botIdentity() {
-  return {
-    type: "bot",
-    name: "Υπολογιστής"
-  };
+  return getPlayerIdentity(
+    playerNumber,
+    {
+      mode: S[modeKey],
+      profileId: S[profileKey],
+      guestName: S[guestKey]
+    },
+    S.profiles
+  );
 }
 
 function resolvePlayerIdentities() {
@@ -293,9 +310,10 @@ function playerSetupPanel(playerNumber) {
   ensurePlayerProfileSelection(playerNumber);
 
   const modeKey = `player${playerNumber}SetupMode`;
-  const profileKey = `player${playerNumber}ProfileName`;
+  const profileKey = `player${playerNumber}ProfileId`;
   const guestKey = `player${playerNumber}GuestName`;
   const newProfileKey = `player${playerNumber}NewProfileName`;
+  const newProfileEmailKey = `player${playerNumber}NewProfileEmail`;
   const isProfileMode = S[modeKey] === "profile";
   const isCreateMode = S[modeKey] === "create";
   const isGuestMode = S[modeKey] === "guest";
@@ -354,7 +372,7 @@ function playerSetupPanel(playerNumber) {
             </select>
 
             <p class="mt-3 text-xs font-bold text-slate-400">
-              Επιλεγμένο προφίλ: ${escapeHtml(S[profileKey])}
+              Επιλεγμένο προφίλ: ${escapeHtml(profileDisplayLabel(findProfileById(S.profiles, S[profileKey])))}
             </p>
           `
           : ""
@@ -383,6 +401,16 @@ function playerSetupPanel(playerNumber) {
               <input
                 value="${escapeHtml(S[newProfileKey])}"
                 oninput="setNewProfileName(${playerNumber}, this.value)"
+                class="mb-3 w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 outline-none focus:border-amber-400"
+              />
+
+              <label class="mb-2 block text-sm font-bold text-slate-300">
+                Email (προαιρετικό)
+              </label>
+
+              <input
+                value="${escapeHtml(S[newProfileEmailKey])}"
+                oninput="setNewProfileEmail(${playerNumber}, this.value)"
                 class="mb-3 w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 outline-none focus:border-amber-400"
               />
 
@@ -416,14 +444,6 @@ function applyPlayerNames() {
   S.player2Name = S.mode === "human"
     ? escapeHtml(playerDisplayName(2))
     : "Υπολογιστής";
-}
-
-function playerPairKey(identities = S.playerIdentities) {
-  const pair = identities.map(identity => (
-    `${identity.type}:${normalizeProfileName(identity.profileName || identity.name).toLocaleLowerCase("el-GR")}`
-  ));
-
-  return pair.sort().join("|");
 }
 
 function gameUniquenessKey(identities = S.playerIdentities) {
@@ -525,11 +545,7 @@ function updateCurrentGameStatus(status, extra = {}) {
 function canPauseCurrentGame() {
   if (!S.currentGameId) return false;
 
-  const humanPlayers = S.mode === "human"
-    ? S.playerIdentities
-    : [S.playerIdentities[0]];
-
-  return humanPlayers.every(identity => identity?.type === "profile");
+  return canPauseIdentities(S.playerIdentities, S.mode);
 }
 
 function conflictingPausedGame() {
@@ -547,6 +563,7 @@ function conflictingPausedGame() {
 function exitMatch() {
   stopTimer();
   updateCurrentGameStatus("abandoned", { endedAt: nowIso() });
+  clearProfileFeedback();
   S.currentGameId = null;
   S.currentGameStartedAt = null;
   S.screen = "homeMenu";
@@ -555,6 +572,7 @@ function exitMatch() {
 
 function returnToHomeMenu() {
   stopTimer();
+  clearProfileFeedback();
   S.currentGameId = null;
   S.currentGameStartedAt = null;
   S.screen = "homeMenu";
@@ -712,8 +730,8 @@ function setPlayerSetupMode(playerNumber, mode) {
   render();
 }
 
-function selectPlayerProfile(playerNumber, profileName) {
-  S[`player${playerNumber}ProfileName`] = profileName;
+function selectPlayerProfile(playerNumber, profileId) {
+  S[`player${playerNumber}ProfileId`] = profileId;
   S[`player${playerNumber}SetupMode`] = "profile";
   render();
 }
@@ -732,9 +750,14 @@ function setNewProfileName(playerNumber, name) {
   S[`player${playerNumber}NewProfileName`] = name;
 }
 
+function setNewProfileEmail(playerNumber, email) {
+  S[`player${playerNumber}NewProfileEmail`] = email;
+}
+
 function saveNewProfile(playerNumber) {
   const newProfileKey = `player${playerNumber}NewProfileName`;
-  const result = profileStore.create(S[newProfileKey]);
+  const newProfileEmailKey = `player${playerNumber}NewProfileEmail`;
+  const result = profileStore.create(S[newProfileKey], S[newProfileEmailKey]);
 
   if (!result.ok) {
     S.profileMessage = result.message;
@@ -743,9 +766,10 @@ function saveNewProfile(playerNumber) {
   }
 
   S.profiles = result.profiles;
-  S[`player${playerNumber}ProfileName`] = result.profileName;
+  S[`player${playerNumber}ProfileId`] = result.profileId;
   S[`player${playerNumber}SetupMode`] = "profile";
   S[newProfileKey] = "";
+  S[newProfileEmailKey] = "";
   S.profileMessage = `Το προφίλ "${result.profileName}" δημιουργήθηκε.`;
   render();
 }
@@ -754,8 +778,12 @@ function setProfileManagerName(name) {
   S.profileManagerName = name;
 }
 
+function setProfileManagerEmail(email) {
+  S.profileManagerEmail = email;
+}
+
 function createManagedProfile() {
-  const result = profileStore.create(S.profileManagerName);
+  const result = profileStore.create(S.profileManagerName, S.profileManagerEmail);
 
   if (!result.ok) {
     S.profileMessage = result.message;
@@ -765,14 +793,21 @@ function createManagedProfile() {
 
   S.profiles = result.profiles;
   S.profileManagerName = "";
+  S.profileManagerEmail = "";
   S.profileMessage = `Το προφίλ "${result.profileName}" δημιουργήθηκε.`;
   render();
 }
 
-function startEditProfile(profileName) {
-  profileName = readActionValue(profileName);
-  S.editingProfileName = profileName;
-  S.editingProfileValue = profileName;
+function startEditProfile(profileId) {
+  profileId = readActionValue(profileId);
+  const profile = findProfileById(S.profiles, profileId);
+
+  if (!profile) return;
+
+  S.editingProfileId = profile.id;
+  S.editingProfileName = profile.name;
+  S.editingProfileValue = profile.name;
+  S.editingProfileEmail = profile.email || "";
   S.profileMessage = "";
   render();
 }
@@ -781,16 +816,26 @@ function setEditingProfileValue(name) {
   S.editingProfileValue = name;
 }
 
+function setEditingProfileEmail(email) {
+  S.editingProfileEmail = email;
+}
+
 function cancelEditProfile() {
+  S.editingProfileId = "";
   S.editingProfileName = "";
   S.editingProfileValue = "";
+  S.editingProfileEmail = "";
   S.profileMessage = "";
   render();
 }
 
 function saveProfileEdit() {
+  const currentProfile = findProfileById(S.profiles, S.editingProfileId);
   const currentName = S.editingProfileName;
-  const result = profileStore.rename(currentName, S.editingProfileValue);
+  const result = profileStore.update(S.editingProfileId, {
+    name: S.editingProfileValue,
+    email: S.editingProfileEmail
+  });
 
   if (!result.ok) {
     S.profileMessage = result.message;
@@ -800,26 +845,32 @@ function saveProfileEdit() {
 
   S.profiles = result.profiles;
 
-  if (S.player1ProfileName === currentName) S.player1ProfileName = result.profileName;
-  if (S.player2ProfileName === currentName) S.player2ProfileName = result.profileName;
-
-  gameHistoryStore.renameProfile(currentName, result.profileName);
+  gameHistoryStore.updateProfile(result.profileId, {
+    currentName: currentProfile?.name || currentName,
+    name: result.profileName,
+    email: result.profile.email
+  });
   syncGameHistory();
 
+  S.editingProfileId = "";
   S.editingProfileName = "";
   S.editingProfileValue = "";
+  S.editingProfileEmail = "";
   S.profileMessage = `Το προφίλ μετονομάστηκε σε "${result.profileName}".`;
   render();
 }
 
-function deleteManagedProfile(profileName) {
-  profileName = readActionValue(profileName);
+function deleteManagedProfile(profileId) {
+  profileId = readActionValue(profileId);
+  const profile = findProfileById(S.profiles, profileId);
 
-  if (!confirm(`Να διαγραφεί το προφίλ "${profileName}" και το σχετικό ιστορικό παιχνιδιών;`)) {
+  if (!profile) return;
+
+  if (!confirm(`Να διαγραφεί το προφίλ "${profile.name}" και το σχετικό ιστορικό παιχνιδιών;`)) {
     return;
   }
 
-  const result = profileStore.delete(profileName);
+  const result = profileStore.delete(profileId);
 
   if (!result.ok) {
     S.profileMessage = result.message;
@@ -828,19 +879,21 @@ function deleteManagedProfile(profileName) {
   }
 
   S.profiles = result.profiles;
-  S.gameHistory = gameHistoryStore.deleteByProfile(profileName);
+  S.gameHistory = gameHistoryStore.deleteByProfile(profileId, profile.name);
 
-  if (S.player1ProfileName === profileName) S.player1ProfileName = S.profiles[0] || "";
-  if (S.player2ProfileName === profileName) S.player2ProfileName = S.profiles[0] || "";
+  if (S.player1ProfileId === profileId) S.player1ProfileId = firstProfileId(S.profiles);
+  if (S.player2ProfileId === profileId) S.player2ProfileId = firstProfileId(S.profiles);
 
   if (S.profiles.length === 0) {
     S.player1SetupMode = "guest";
     S.player2SetupMode = "guest";
   }
 
+  S.editingProfileId = "";
   S.editingProfileName = "";
   S.editingProfileValue = "";
-  S.profileMessage = `Το προφίλ "${profileName}" διαγράφηκε.`;
+  S.editingProfileEmail = "";
+  S.profileMessage = `Το προφίλ "${profile.name}" διαγράφηκε.`;
   render();
 }
 
@@ -1471,6 +1524,16 @@ function profiles() {
           class="mb-3 w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 outline-none focus:border-amber-400"
         />
 
+        <label class="mb-2 block text-sm font-bold text-slate-300">
+          Email (προαιρετικό)
+        </label>
+
+        <input
+          value="${escapeHtml(S.profileManagerEmail)}"
+          oninput="setProfileManagerEmail(this.value)"
+          class="mb-3 w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 outline-none focus:border-amber-400"
+        />
+
         <button
           onclick="createManagedProfile()"
           class="w-full rounded-2xl bg-amber-500 px-4 py-3 font-black text-slate-950"
@@ -1497,14 +1560,28 @@ function profiles() {
                 Δεν υπάρχουν αποθηκευμένα προφίλ.
               </p>
             `
-            : S.profiles.map(profileName => `
+            : S.profiles.map(profile => `
               <div class="rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
                 ${
-                  S.editingProfileName === profileName
+                  S.editingProfileId === profile.id
                     ? `
+                      <label class="mb-2 block text-sm font-bold text-slate-300">
+                        Όνομα προφίλ
+                      </label>
+
                       <input
                         value="${escapeHtml(S.editingProfileValue)}"
                         oninput="setEditingProfileValue(this.value)"
+                        class="mb-3 w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 outline-none focus:border-amber-400"
+                      />
+
+                      <label class="mb-2 block text-sm font-bold text-slate-300">
+                        Email (προαιρετικό)
+                      </label>
+
+                      <input
+                        value="${escapeHtml(S.editingProfileEmail)}"
+                        oninput="setEditingProfileEmail(this.value)"
                         class="mb-3 w-full rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 outline-none focus:border-amber-400"
                       />
 
@@ -1526,18 +1603,23 @@ function profiles() {
                     `
                     : `
                       <div class="flex items-center justify-between gap-3">
-                        <p class="font-black text-amber-400">${escapeHtml(profileName)}</p>
+                        <div>
+                          <p class="font-black text-amber-400">${escapeHtml(profile.name)}</p>
+                          <p class="mt-1 text-xs font-bold text-slate-500">
+                            ${profile.email ? escapeHtml(profile.email) : `ID: ${escapeHtml(profile.id.slice(0, 8))}`}
+                          </p>
+                        </div>
 
                         <div class="flex gap-2">
                           <button
-                            onclick="startEditProfile('${actionValue(profileName)}')"
+                            onclick="startEditProfile('${actionValue(profile.id)}')"
                             class="rounded-xl border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-black"
                           >
                             Edit
                           </button>
 
                           <button
-                            onclick="deleteManagedProfile('${actionValue(profileName)}')"
+                            onclick="deleteManagedProfile('${actionValue(profile.id)}')"
                             class="rounded-xl border border-rose-500/50 bg-rose-500/10 px-3 py-2 text-xs font-black text-rose-300"
                           >
                             Delete
@@ -2125,11 +2207,14 @@ window.selectPlayerProfile = selectPlayerProfile;
 window.setGuestName = setGuestName;
 window.toggleCreateProfile = toggleCreateProfile;
 window.setNewProfileName = setNewProfileName;
+window.setNewProfileEmail = setNewProfileEmail;
 window.saveNewProfile = saveNewProfile;
 window.setProfileManagerName = setProfileManagerName;
+window.setProfileManagerEmail = setProfileManagerEmail;
 window.createManagedProfile = createManagedProfile;
 window.startEditProfile = startEditProfile;
 window.setEditingProfileValue = setEditingProfileValue;
+window.setEditingProfileEmail = setEditingProfileEmail;
 window.cancelEditProfile = cancelEditProfile;
 window.saveProfileEdit = saveProfileEdit;
 window.deleteManagedProfile = deleteManagedProfile;
